@@ -9,6 +9,7 @@ pub struct ClipboardItem {
     pub created_at: String,
 }
 
+#[derive(Clone)]
 pub struct Db {
     conn: Arc<Mutex<Connection>>,
 }
@@ -59,6 +60,12 @@ impl Db {
         }
         Ok(items)
     }
+
+    pub fn clear_history(&self) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM history", [])?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -84,5 +91,9 @@ mod tests {
         assert_eq!(history.len(), 2);
         assert_eq!(history[0].content, "hello");
         assert_eq!(history[1].content, "world");
+
+        db.clear_history().unwrap();
+        let history = db.get_history(10).unwrap();
+        assert_eq!(history.len(), 0);
     }
 }
