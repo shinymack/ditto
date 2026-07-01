@@ -24,6 +24,14 @@ fn select_item(app_handle: tauri::AppHandle, content: String) -> Result<(), Stri
 }
 
 #[tauri::command]
+fn hide_window(app_handle: tauri::AppHandle) -> Result<(), String> {
+    if let Some(window) = app_handle.get_webview_window("main") {
+        let _ = window.hide();
+    }
+    Ok(())
+}
+
+#[tauri::command]
 fn clear_history(state: tauri::State<'_, AppState>) -> Result<(), String> {
     state.db.clear_history().map_err(|e| e.to_string())
 }
@@ -43,7 +51,11 @@ pub fn run() {
                                         let _ = window.hide();
                                     } else {
                                         let _ = window.show();
-                                        let _ = window.set_focus();
+                                        let w = window.clone();
+                                        std::thread::spawn(move || {
+                                            std::thread::sleep(std::time::Duration::from_millis(50));
+                                            let _ = w.set_focus();
+                                        });
                                     }
                                 }
                             }
@@ -90,7 +102,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_history,
             select_item,
-            clear_history
+            clear_history,
+            hide_window
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

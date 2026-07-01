@@ -1,7 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 
 interface ClipboardItem {
   id: number;
@@ -61,9 +60,11 @@ function App() {
   }, [query]);
 
   useEffect(() => {
-    if (searchInputRef.current) {
-      searchInputRef.current.focus();
-    }
+    const timer = setTimeout(() => {
+      if (searchInputRef.current) {
+        searchInputRef.current.focus();
+      }
+    }, 100);
 
     let unlisten: (() => void) | undefined;
     listen("clipboard-updated", () => {
@@ -75,9 +76,27 @@ function App() {
     });
 
     return () => {
+      clearTimeout(timer);
       if (unlisten) unlisten();
     };
   }, [isPaused, query]);
+
+  useEffect(() => {
+    let unlistenFocus: (() => void) | undefined;
+
+    listen("tauri://focus", () => {
+      if (searchInputRef.current) {
+        searchInputRef.current.focus();
+        searchInputRef.current.select();
+      }
+    }).then((fn) => {
+      unlistenFocus = fn;
+    });
+
+    return () => {
+      if (unlistenFocus) unlistenFocus();
+    };
+  }, []);
 
   useEffect(() => {
     const selectedEl = document.querySelector(".selected-item");
@@ -89,7 +108,12 @@ function App() {
   useEffect(() => {
     const handleKeyDown = async (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        await getCurrentWindow().hide();
+        e.preventDefault();
+        try {
+          await invoke("hide_window");
+        } catch (err) {
+          console.error(err);
+        }
         return;
       }
 
@@ -139,7 +163,9 @@ function App() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [history, selectedIndex, query]);
 
+
   const activeItem = history[selectedIndex];
+  const isActiveImage = activeItem?.content.startsWith("data:image/png;base64,");
   const activeItemSize = activeItem
     ? new Blob([activeItem.content]).size
     : 0;
@@ -189,11 +215,13 @@ function App() {
         <div className="flex-1 overflow-y-auto p-2 space-y-1">
           {history.map((item, index) => {
             const isSelected = index === selectedIndex;
+            const isImage = item.content.startsWith("data:image/png;base64,");
             const singleLine = item.content.replace(/\s+/g, " ");
-            const preview =
-              singleLine.length > 35
-                ? singleLine.substring(0, 35) + "..."
-                : singleLine;
+            const preview = isImage
+              ? "Image Clip"
+              : singleLine.length > 35
+              ? singleLine.substring(0, 35) + "..."
+              : singleLine;
 
             return (
               <div
@@ -213,8 +241,14 @@ function App() {
                 }`}
               >
                 <div className="flex items-center gap-3 overflow-hidden">
-                  <div className="text-secondary select-none font-mono text-sm">
-                    T
+                  <div className="text-secondary select-none font-mono text-sm flex items-center justify-center">
+                    {isImage ? (
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                      </svg>
+                    ) : (
+                      "T"
+                    )}
                   </div>
                   <div className="flex flex-col overflow-hidden">
                     <span className="text-sm font-sans text-[var(--text-primary)] truncate">
@@ -239,15 +273,25 @@ function App() {
       <div className="flex-1 flex flex-col bg-[rgba(12,12,14,0.4)]">
         {activeItem ? (
           <>
-            <div className="flex-1 overflow-y-auto p-6 font-mono text-sm whitespace-pre-wrap select-text text-[var(--text-primary)]">
-              {activeItem.content}
+            <div className="flex-1 overflow-y-auto p-6 flex items-center justify-center select-text">
+              {isActiveImage ? (
+                <img
+                  src={activeItem.content}
+                  alt="Clipboard Preview"
+                  className="max-w-full max-h-full object-contain rounded-lg border border-[var(--border-card)] shadow-lg"
+                />
+              ) : (
+                <div className="w-full h-full font-mono text-sm whitespace-pre-wrap text-[var(--text-primary)] overflow-y-auto">
+                  {activeItem.content}
+                </div>
+              )}
             </div>
 
             <div className="border-t border-[var(--border-card)] p-6 bg-[#0f0f12] text-xs text-[var(--text-secondary)] space-y-3">
               <div className="grid grid-cols-[100px_1fr] gap-2">
                 <span>Mime</span>
                 <span className="font-mono text-[var(--text-primary)]">
-                  text/plain
+                  {isActiveImage ? "image/png" : "text/plain"}
                 </span>
 
                 <span>Size</span>
@@ -268,23 +312,23 @@ function App() {
 
               <div className="flex items-center justify-between border-t border-[var(--border-card)] pt-3 text-[10px]">
                 <div className="flex gap-4">
-                  <span>
-                    <kbd className="bg-[rgba(255,255,255,0.05)] px-1.5 py-0.5 rounded border border-[var(--border-card)] font-mono">
+                  <span className="flex items-center gap-1.5">
+                    <kbd className="bg-[rgba(255,255,255,0.05)] px-1.5 py-0.5 rounded border border-[var(--border-card)] font-mono text-[9px]">
                       Enter
-                    </kbd>{" "}
-                    Copy
+                    </kbd>
+                    <span>Copy</span>
                   </span>
-                  <span>
-                    <kbd className="bg-[rgba(255,255,255,0.05)] px-1.5 py-0.5 rounded border border-[var(--border-card)] font-mono">
+                  <span className="flex items-center gap-1.5">
+                    <kbd className="bg-[rgba(255,255,255,0.05)] px-1.5 py-0.5 rounded border border-[var(--border-card)] font-mono text-[9px]">
                       Esc
-                    </kbd>{" "}
-                    Hide
+                    </kbd>
+                    <span>Hide</span>
                   </span>
-                  <span>
-                    <kbd className="bg-[rgba(255,255,255,0.05)] px-1.5 py-0.5 rounded border border-[var(--border-card)] font-mono">
+                  <span className="flex items-center gap-1.5">
+                    <kbd className="bg-[rgba(255,255,255,0.05)] px-1.5 py-0.5 rounded border border-[var(--border-card)] font-mono text-[9px]">
                       Ctrl+L
-                    </kbd>{" "}
-                    Clear
+                    </kbd>
+                    <span>Clear</span>
                   </span>
                 </div>
               </div>

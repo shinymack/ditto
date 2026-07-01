@@ -4,9 +4,15 @@
   "version": "0.1.0",
   "identifier": "com.shinymack.ditto",
   "build": {
-    "beforeDevCommand": "bun --cwd ../app run dev",
+    "beforeDevCommand": {
+      "script": "bun run dev",
+      "cwd": "../app"
+    },
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "bun --cwd ../app run build",
+    "beforeBuildCommand": {
+      "script": "bun run build",
+      "cwd": "../app"
+    },
     "frontendDist": "../app/dist"
   },
   "app": {
