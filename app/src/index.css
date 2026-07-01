@@ -1,0 +1,48 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg-base: var(--bg-base);
+  --color-bg-surface: var(--bg-surface);
+  --color-border-card: var(--border-card);
+  --color-accent-primary: var(--accent-primary);
+  --color-accent-hover: var(--accent-hover);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
+  
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+}
+
+:root {
+  /* Semantic Design Tokens - Dark Theme with Yellow Accent */
+  --bg-base: #0c0c0e;
+  --bg-surface: rgba(20, 20, 25, 0.75);
+  --border-card: rgba(255, 255, 255, 0.08);
+  --accent-primary: #eab308; /* Yellow-500 accent */
+  --accent-hover: #ca8a04;   /* Yellow-600 */
+  --text-primary: #f3f4f6;   /* Gray-100 */
+  --text-secondary: #9ca3af; /* Gray-400 */
+  --text-muted: #4b5563;     /* Gray-600 */
+  
+  --font-sans: 'Outfit', 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'RoobertMono', 'Fira Code', monospace;
+}
+
+body {
+  background-color: var(--bg-base);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  user-select: none;
+}
+
+/* Glassmorphism custom utilities */
+.glass {
+  background: var(--bg-surface);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--border-card);
+}
