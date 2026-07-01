@@ -2,8 +2,11 @@
   "name": "ditto-workspace",
   "private": true,
   "scripts": {
-    "dev": "bun --cwd src-tauri ../app/node_modules/.bin/tauri dev",
-    "build": "bun --cwd src-tauri ../app/node_modules/.bin/tauri build",
-    "tauri": "bun --cwd src-tauri ../app/node_modules/.bin/tauri"
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.11.4"
   }
 }

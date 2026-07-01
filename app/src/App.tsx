@@ -26,13 +26,20 @@ function getRelativeTime(timestampStr: string): string {
     return "Just now";
   }
   const diffSec = Math.floor(diffMs / 1000);
-  if (diffSec < 60) return "Just now";
+  if (diffSec < 10) return "Just now";
+  if (diffSec < 60) return `${diffSec}s ago`;
   const diffMin = Math.floor(diffSec / 60);
   if (diffMin < 60) return `${diffMin}m ago`;
   const diffHr = Math.floor(diffMin / 60);
   if (diffHr < 24) return `${diffHr}h ago`;
   const diffDays = Math.floor(diffHr / 24);
   return `${diffDays}d ago`;
+}
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function App() {
@@ -42,6 +49,17 @@ function App() {
   const [isPaused, setIsPaused] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
+  const queryRef = useRef(query);
+  const isPausedRef = useRef(isPaused);
+
+  useEffect(() => {
+    queryRef.current = query;
+  }, [query]);
+
+  useEffect(() => {
+    isPausedRef.current = isPaused;
+  }, [isPaused]);
+
   const fetchHistory = async (searchQuery: string) => {
     try {
       const items = await invoke<ClipboardItem[]>("get_history", {
@@ -49,66 +67,63 @@ function App() {
         query: searchQuery || null,
       });
       setHistory(items);
-      setSelectedIndex(0);
     } catch (err) {
-      console.error(err);
+      console.error("Failed to fetch history:", err);
     }
   };
 
+  // Fetch history when query changes
   useEffect(() => {
     fetchHistory(query);
+    setSelectedIndex(0);
   }, [query]);
 
+  // Set up listeners once on mount
   useEffect(() => {
+    // Focus search input on mount
     const timer = setTimeout(() => {
       if (searchInputRef.current) {
         searchInputRef.current.focus();
       }
-    }, 100);
+    }, 150);
 
-    let unlisten: (() => void) | undefined;
-    listen("clipboard-updated", () => {
-      if (!isPaused) {
-        fetchHistory(query);
-      }
-    }).then((fn) => {
-      unlisten = fn;
-    });
-
-    return () => {
-      clearTimeout(timer);
-      if (unlisten) unlisten();
-    };
-  }, [isPaused, query]);
-
-  useEffect(() => {
+    let unlistenClipboard: (() => void) | undefined;
     let unlistenFocus: (() => void) | undefined;
 
+    // Clipboard updates
+    listen("clipboard-updated", () => {
+      if (!isPausedRef.current) {
+        fetchHistory(queryRef.current);
+      }
+    }).then((fn) => {
+      unlistenClipboard = fn;
+    });
+
+    // Window focus: refocus and position cursor at the end
     listen("tauri://focus", () => {
       if (searchInputRef.current) {
         searchInputRef.current.focus();
-        searchInputRef.current.select();
+        const len = searchInputRef.current.value.length;
+        searchInputRef.current.setSelectionRange(len, len);
       }
     }).then((fn) => {
       unlistenFocus = fn;
     });
 
     return () => {
+      clearTimeout(timer);
+      if (unlistenClipboard) unlistenClipboard();
       if (unlistenFocus) unlistenFocus();
     };
   }, []);
 
-  useEffect(() => {
-    const selectedEl = document.querySelector(".selected-item");
-    if (selectedEl) {
-      selectedEl.scrollIntoView({ block: "nearest" });
-    }
-  }, [selectedIndex]);
-
+  // Keyboard navigation and actions
   useEffect(() => {
     const handleKeyDown = async (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
+        setQuery("");
+        setSelectedIndex(0);
         try {
           await invoke("hide_window");
         } catch (err) {
@@ -132,6 +147,8 @@ function App() {
         const num = parseInt(e.key);
         if (num >= 1 && num <= 9 && history[num - 1]) {
           e.preventDefault();
+          setQuery("");
+          setSelectedIndex(0);
           try {
             await invoke("select_item", { content: history[num - 1].content });
           } catch (err) {
@@ -150,6 +167,8 @@ function App() {
       } else if (e.key === "Enter") {
         if (history[selectedIndex]) {
           e.preventDefault();
+          setQuery("");
+          setSelectedIndex(0);
           try {
             await invoke("select_item", { content: history[selectedIndex].content });
           } catch (err) {
@@ -163,6 +182,13 @@ function App() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [history, selectedIndex, query]);
 
+  // Keep selected item visible in scroll view
+  useEffect(() => {
+    const selectedEl = document.querySelector(".selected-item");
+    if (selectedEl) {
+      selectedEl.scrollIntoView({ block: "nearest" });
+    }
+  }, [selectedIndex]);
 
   const activeItem = history[selectedIndex];
   const isActiveImage = activeItem?.content.startsWith("data:image/png;base64,");
@@ -296,7 +322,7 @@ function App() {
 
                 <span>Size</span>
                 <span className="font-mono text-[var(--text-primary)]">
-                  {activeItemSize} B
+                  {formatSize(activeItemSize)}
                 </span>
 
                 <span>Copied at</span>
