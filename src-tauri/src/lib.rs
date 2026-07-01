@@ -9,8 +9,9 @@ struct AppState {
 fn get_history(
     state: tauri::State<'_, AppState>,
     limit: usize,
+    query: Option<String>,
 ) -> Result<Vec<ditto_core::db::ClipboardItem>, String> {
-    state.db.get_history(limit).map_err(|e| e.to_string())
+    state.db.get_history(limit, query.as_deref()).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

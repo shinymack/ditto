@@ -41,8 +41,29 @@ impl Db {
         Ok(())
     }
 
-    pub fn get_history(&self, limit: usize) -> Result<Vec<ClipboardItem>> {
+    pub fn get_history(&self, limit: usize, query: Option<&str>) -> Result<Vec<ClipboardItem>> {
         let conn = self.conn.lock().unwrap();
+        let mut items = Vec::new();
+        if let Some(q) = query {
+            if !q.trim().is_empty() {
+                let mut stmt = conn.prepare(
+                    "SELECT id, content, created_at FROM history WHERE content LIKE ?1 ORDER BY created_at DESC LIMIT ?2",
+                )?;
+                let search_term = format!("%{}%", q.trim());
+                let rows = stmt.query_map(params![search_term, limit as i64], |row| {
+                    Ok(ClipboardItem {
+                        id: row.get(0)?,
+                        content: row.get(1)?,
+                        created_at: row.get(2)?,
+                    })
+                })?;
+                for row in rows {
+                    items.push(row?);
+                }
+                return Ok(items);
+            }
+        }
+
         let mut stmt = conn.prepare(
             "SELECT id, content, created_at FROM history ORDER BY created_at DESC LIMIT ?1",
         )?;
@@ -53,8 +74,6 @@ impl Db {
                 created_at: row.get(2)?,
             })
         })?;
-
-        let mut items = Vec::new();
         for row in rows {
             items.push(row?);
         }
@@ -80,20 +99,25 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(2));
         db.insert_or_update("world").unwrap();
 
-        let history = db.get_history(10).unwrap();
+        let history = db.get_history(10, None).unwrap();
         assert_eq!(history.len(), 2);
         assert_eq!(history[0].content, "world");
         assert_eq!(history[1].content, "hello");
 
         std::thread::sleep(std::time::Duration::from_millis(2));
         db.insert_or_update("hello").unwrap();
-        let history = db.get_history(10).unwrap();
+        let history = db.get_history(10, None).unwrap();
         assert_eq!(history.len(), 2);
         assert_eq!(history[0].content, "hello");
         assert_eq!(history[1].content, "world");
 
+        // Test search query filter
+        let history = db.get_history(10, Some("he")).unwrap();
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].content, "hello");
+
         db.clear_history().unwrap();
-        let history = db.get_history(10).unwrap();
+        let history = db.get_history(10, None).unwrap();
         assert_eq!(history.len(), 0);
     }
 }

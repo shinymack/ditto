@@ -14,8 +14,8 @@
       {
         "label": "main",
         "title": "Ditto",
-        "width": 680,
-        "height": 400,
+        "width": 800,
+        "height": 480,
         "decorations": false,
         "transparent": true,
         "alwaysOnTop": true,
