@@ -17,20 +17,26 @@ pub struct Db {
 impl Db {
     pub fn init(path: &str) -> Result<Self> {
         let conn = Connection::open(path)?;
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS history (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                content TEXT UNIQUE NOT NULL,
-                created_at TEXT DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now'))
-            )",
-            [],
-        )?;
+        
+        let version: i32 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+        if version < 1 {
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    content TEXT UNIQUE NOT NULL,
+                    created_at TEXT DEFAULT (strftime('%Y-%m-%d %H:%M:%f', 'now'))
+                )",
+                [],
+            )?;
+            conn.execute("PRAGMA user_version = 1", [])?;
+        }
+
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
         })
     }
 
-    pub fn insert_or_update(&self, content: &str) -> Result<()> {
+    pub fn insert_or_update(&self, content: &str, max_items: usize) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "INSERT INTO history (content, created_at)
@@ -38,6 +44,15 @@ impl Db {
              ON CONFLICT(content) DO UPDATE SET created_at = strftime('%Y-%m-%d %H:%M:%f', 'now')",
             params![content],
         )?;
+
+        // Enforce max_items limit by deleting older entries
+        conn.execute(
+            "DELETE FROM history WHERE id NOT IN (
+                SELECT id FROM history ORDER BY created_at DESC LIMIT ?1
+            )",
+            params![max_items as i64],
+        )?;
+
         Ok(())
     }
 
@@ -95,9 +110,9 @@ mod tests {
     fn test_db_operations() {
         let db = Db::init(":memory:").unwrap();
 
-        db.insert_or_update("hello").unwrap();
+        db.insert_or_update("hello", 10).unwrap();
         std::thread::sleep(std::time::Duration::from_millis(2));
-        db.insert_or_update("world").unwrap();
+        db.insert_or_update("world", 10).unwrap();
 
         let history = db.get_history(10, None).unwrap();
         assert_eq!(history.len(), 2);
@@ -105,7 +120,7 @@ mod tests {
         assert_eq!(history[1].content, "hello");
 
         std::thread::sleep(std::time::Duration::from_millis(2));
-        db.insert_or_update("hello").unwrap();
+        db.insert_or_update("hello", 10).unwrap();
         let history = db.get_history(10, None).unwrap();
         assert_eq!(history.len(), 2);
         assert_eq!(history[0].content, "hello");

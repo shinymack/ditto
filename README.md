@@ -54,3 +54,26 @@ Ensure you have Rust/Cargo installed, and use `bun` for package management:
   ```bash
   bun run tauri build
   ```
+
+## Installation
+
+Clone the repository and run the installation script for your platform from the root directory:
+
+### Linux & macOS
+
+```bash
+./install.sh
+```
+
+### Windows (PowerShell)
+
+```powershell
+.\install.ps1
+```
+
+Once installed, you can start, pause, resume, toggle, or clear the history directly from your terminal using:
+- `ditto start` - Start daemon in background
+- `ditto toggle` - Toggle window visibility
+- `ditto pause` - Pause monitoring
+- `ditto resume` - Resume monitoring
+- `ditto clear` - Clear database history

@@ -20,8 +20,23 @@
       {
         "label": "main",
         "title": "Ditto",
+        "url": "index.html",
         "width": 800,
         "height": 480,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "visible": false,
+        "resizable": false,
+        "center": true,
+        "skipTaskbar": false
+      },
+      {
+        "label": "settings",
+        "title": "Ditto Settings",
+        "url": "index.html",
+        "width": 550,
+        "height": 450,
         "decorations": false,
         "transparent": true,
         "alwaysOnTop": true,

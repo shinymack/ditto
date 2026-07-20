@@ -29,6 +29,26 @@
   --font-mono: 'RoobertMono', 'Fira Code', monospace;
 }
 
+:root[data-theme="cyan"] {
+  --accent-primary: #06b6d4;
+  --accent-hover: #0891b2;
+}
+
+:root[data-theme="emerald"] {
+  --accent-primary: #10b981;
+  --accent-hover: #059669;
+}
+
+:root[data-theme="amber"] {
+  --accent-primary: #f59e0b;
+  --accent-hover: #d97706;
+}
+
+:root[data-theme="rose"] {
+  --accent-primary: #f43f5e;
+  --accent-hover: #e11d48;
+}
+
 body {
   background-color: transparent;
   color: var(--text-primary);
@@ -37,6 +57,9 @@ body {
   padding: 0;
   overflow: hidden;
   user-select: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
 /* Glassmorphism custom utilities */
