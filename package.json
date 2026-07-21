@@ -1,6 +1,9 @@
 {
   "name": "ditto-workspace",
   "private": true,
+  "workspaces": [
+    "app"
+  ],
   "scripts": {
     "dev": "tauri dev",
     "build": "tauri build",
