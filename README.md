@@ -60,7 +60,7 @@ Ensure you have Rust/Cargo installed, and use `bun` for package management:
 You can install Ditto on Linux without cloning or building the repository by running this command in your terminal:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/shinymack/ditto/main/install.sh | sh
+curl -fsSL https://github.com/shinymack/ditto/raw/main/install.sh | sh
 ```
 
 This script detects your platform, downloads the latest precompiled release binary, places it in `~/.local/bin/ditto`, and registers it with your desktop environment.

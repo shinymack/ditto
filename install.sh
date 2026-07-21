@@ -69,11 +69,15 @@ echo -e "${GREEN}Ditto successfully installed to $INSTALL_DIR/ditto!${NC}"
 echo ""
 
 # 7. Environment Path Check
-if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
-  echo -e "${YELLOW}Note: $INSTALL_DIR is not in your PATH. Please add it to your shell profile (e.g., ~/.bashrc or ~/.zshrc):${NC}"
-  echo -e "  export PATH=\"\$HOME/.local/bin:\$PATH\""
-  echo ""
-fi
+case ":$PATH:" in
+  *":$HOME/.local/bin:"*)
+    ;;
+  *)
+    echo -e "${YELLOW}Note: $INSTALL_DIR is not in your PATH. Please add it to your shell profile (e.g., ~/.bashrc or ~/.zshrc):${NC}"
+    echo -e "  export PATH=\"\$HOME/.local/bin:\$PATH\""
+    echo ""
+    ;;
+esac
 
 echo -e "To start Ditto daemon:  ${GREEN}ditto start${NC}"
 echo -e "To toggle visibility:  ${GREEN}ditto toggle${NC}"
