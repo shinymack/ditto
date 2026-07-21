@@ -57,20 +57,19 @@ Ensure you have Rust/Cargo installed, and use `bun` for package management:
 
 ## Installation
 
-Clone the repository and run the installation script for your platform from the root directory:
+You can install Ditto on Linux without cloning or building the repository by running this command in your terminal:
 
-### Linux & macOS
+```bash
+curl -fsSL https://raw.githubusercontent.com/shinymack/ditto/main/install.sh | sh
+```
+
+This script detects your platform, downloads the latest precompiled release binary, places it in `~/.local/bin/ditto`, and registers it with your desktop environment.
+
+If you prefer to build from source, you can clone this repository and run:
 
 ```bash
 ./install.sh
 ```
-
-### Windows (PowerShell)
-
-```powershell
-.\install.ps1
-```
-
 Once installed, you can start, pause, resume, toggle, or clear the history directly from your terminal using:
 - `ditto start` - Start daemon in background
 - `ditto toggle` - Toggle window visibility
