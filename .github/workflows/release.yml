@@ -60,10 +60,15 @@ jobs:
           releaseBody: 'Precompiled builds of Ditto.'
           releaseDraft: false
           prerelease: false
+          uploadPlainBinary: true
           args: ${{ matrix.args }}
 
       - name: Upload standalone binary
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release upload ${{ github.ref_name }} src-tauri/target/release/ditto#ditto-linux-x86_64 --clobber
+          if [ -f "target/release/ditto" ]; then
+            gh release upload ${{ github.ref_name }} target/release/ditto#ditto-linux-x86_64 --clobber
+          elif [ -f "src-tauri/target/release/ditto" ]; then
+            gh release upload ${{ github.ref_name }} src-tauri/target/release/ditto#ditto-linux-x86_64 --clobber
+          fi
