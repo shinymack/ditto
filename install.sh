@@ -1,83 +1,134 @@
-#!/bin/bash
-set -e
+#!/bin/sh
+set -eu
 
-# Colors for terminal output
-GREEN='\033[0;32m'
-BLUE='\033[0;34m'
-YELLOW='\033[1;33m'
-RED='\033[0;31m'
-NC='\033[0m'
+# POSIX-compliant color functions using printf
+info() {
+  printf "\033[0;34m%s\033[0m\n" "$*"
+}
 
-echo -e "${BLUE}=== Installing Ditto Clipboard Manager ===${NC}"
+success() {
+  printf "\033[0;32m%s\033[0m\n" "$*"
+}
 
-# 1. Platform and Architecture Check
+warn() {
+  printf "\033[1;33m%s\033[0m\n" "$*"
+}
+
+error() {
+  printf "\033[0;31mError: %s\033[0m\n" "$*" >&2
+  exit 1
+}
+
+has_cmd() {
+  command -v "$1" >/dev/null 2>&1
+}
+
+# 1. Dependency Check
+if ! has_cmd curl && ! has_cmd wget; then
+  error "Either 'curl' or 'wget' is required to download Ditto. Please install one of them first."
+fi
+
+# 2. OS & Architecture Detection
 OS="$(uname -s)"
 ARCH="$(uname -m)"
 
-if [ "$OS" != "Linux" ]; then
-  echo -e "${RED}Error: Ditto is currently only supported on Linux.${NC}"
-  exit 1
-fi
+case "$OS" in
+  Linux*)
+    OS="linux"
+    ;;
+  *)
+    error "Ditto is currently only supported on Linux."
+    ;;
+esac
 
-if [ "$ARCH" != "x86_64" ]; then
-  echo -e "${RED}Error: Precompiled binaries are currently only available for x86_64 architecture.${NC}"
-  echo -e "${YELLOW}To install on $ARCH, please clone the repository and build from source.${NC}"
-  exit 1
-fi
+case "$ARCH" in
+  x86_64|amd64)
+    ASSET_NAMES="ditto-linux-x86_64 ditto_linux_x64 ditto"
+    ;;
+  aarch64|arm64)
+    ASSET_NAMES="ditto-linux-aarch64 ditto_linux_arm64 ditto"
+    ;;
+  *)
+    error "Unsupported architecture: $ARCH"
+    ;;
+esac
 
-# 2. Dependency Check
-if ! command -v curl &> /dev/null; then
-  echo -e "${RED}Error: curl is required to download Ditto. Please install it first.${NC}"
-  exit 1
-fi
+# 3. Retrieve Latest Tag
+get_latest_tag() {
+  _effective_url=""
+  if has_cmd curl; then
+    _effective_url="$(curl -sIL -o /dev/null -w "%{url_effective}" "https://github.com/shinymack/ditto/releases/latest" 2>/dev/null || true)"
+  elif has_cmd wget; then
+    _effective_url="$(wget --max-redirect=5 --spider -S "https://github.com/shinymack/ditto/releases/latest" 2>&1 | grep -i "Location:" | tail -n 1 | awk '{print $2}' || true)"
+  fi
 
-# 3. Retrieve Latest Version
-echo -e "${BLUE}Retrieving the latest release information...${NC}"
-LATEST_URL="https://github.com/shinymack/ditto/releases/latest"
-TAG=$(curl -sI "$LATEST_URL" | grep -i location | tr -d '\r' | awk -F/ '{print $NF}')
+  _tag=""
+  if [ -n "$_effective_url" ]; then
+    _tag="$(basename "$_effective_url")"
+  fi
 
-# Fallback to default version if no releases exist yet in the repository
-if [ -z "$TAG" ] || [ "$TAG" = "latest" ]; then
-  TAG="v0.1.0"
-  echo -e "${YELLOW}No active release found. Falling back to default tag: ${TAG}${NC}"
-fi
+  if [ -z "$_tag" ] || [ "$_tag" = "latest" ] || [ "$_tag" = "releases" ]; then
+    _tag="v0.1.0"
+  fi
 
-DOWNLOAD_URL="https://github.com/shinymack/ditto/releases/download/${TAG}/ditto-linux-x86_64"
+  printf "%s" "$_tag"
+}
 
-# 4. Determine Installation Directory
+download_file() {
+  _url="$1"
+  _dest="$2"
+  if has_cmd curl; then
+    curl -fsSL "$_url" -o "$_dest" 2>/dev/null
+  elif has_cmd wget; then
+    wget -qO "$_dest" "$_url" 2>/dev/null
+  fi
+}
+
+info "=== Installing Ditto Clipboard Manager ==="
+
+TAG="$(get_latest_tag)"
+info "Resolving target release: ${TAG}"
+
 INSTALL_DIR="$HOME/.local/bin"
 if [ ! -d "$INSTALL_DIR" ]; then
   mkdir -p "$INSTALL_DIR"
 fi
 
-# 5. Download Precompiled Binary
-echo -e "${BLUE}Downloading Ditto binary (${TAG}) from GitHub...${NC}"
-if ! curl -L "$DOWNLOAD_URL" -o "$INSTALL_DIR/ditto"; then
-  echo -e "${RED}Error: Failed to download binary from $DOWNLOAD_URL${NC}"
-  exit 1
+DOWNLOAD_SUCCESS=0
+for ASSET in $ASSET_NAMES; do
+  DOWNLOAD_URL="https://github.com/shinymack/ditto/releases/download/${TAG}/${ASSET}"
+  info "Trying to download binary (${ASSET})..."
+  if download_file "$DOWNLOAD_URL" "$INSTALL_DIR/ditto"; then
+    if [ -s "$INSTALL_DIR/ditto" ]; then
+      DOWNLOAD_SUCCESS=1
+      break
+    fi
+  fi
+done
+
+if [ "$DOWNLOAD_SUCCESS" -ne 1 ]; then
+  error "Failed to download a valid binary from release ${TAG}. Checked assets: ${ASSET_NAMES}"
 fi
 
 chmod +x "$INSTALL_DIR/ditto"
 
-# 6. Verify Installation
-if ! "$INSTALL_DIR/ditto" --help > /dev/null; then
-  echo -e "${RED}Error: Downloaded binary is invalid or cannot be executed.${NC}"
-  exit 1
+info "Verifying binary execution..."
+if ! "$INSTALL_DIR/ditto" --help >/dev/null 2>&1; then
+  error "Downloaded binary is invalid or cannot be executed on this system."
 fi
 
-echo -e "${GREEN}Ditto successfully installed to $INSTALL_DIR/ditto!${NC}"
-echo ""
+success "Ditto successfully installed to $INSTALL_DIR/ditto!"
+printf "\n"
 
-# 7. Environment Path Check
 case ":$PATH:" in
   *":$HOME/.local/bin:"*)
     ;;
   *)
-    echo -e "${YELLOW}Note: $INSTALL_DIR is not in your PATH. Please add it to your shell profile (e.g., ~/.bashrc or ~/.zshrc):${NC}"
-    echo -e "  export PATH=\"\$HOME/.local/bin:\$PATH\""
-    echo ""
+    warn "Note: $INSTALL_DIR is not in your PATH."
+    warn "Add this line to your shell profile (e.g., ~/.bashrc or ~/.zshrc):"
+    printf "  export PATH=\"\$HOME/.local/bin:\$PATH\"\n\n"
     ;;
 esac
 
-echo -e "To start Ditto daemon:  ${GREEN}ditto start${NC}"
-echo -e "To toggle visibility:  ${GREEN}ditto toggle${NC}"
+info "To start Ditto daemon:  ditto start"
+info "To toggle visibility:  ditto toggle"
