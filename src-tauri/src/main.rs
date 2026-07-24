@@ -82,13 +82,7 @@ fn main() {
             print_help();
         }
         None => {
-            // If daemon is already running, toggle the UI
-            if let Ok(mut stream) = UnixStream::connect(socket_path()) {
-                let _ = stream.write_all(b"toggle");
-            } else {
-                // Otherwise, print help instructions
-                print_help();
-            }
+            print_help();
         }
         Some("toggle") => {
             if let Ok(mut stream) = UnixStream::connect(socket_path()) {

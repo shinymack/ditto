@@ -120,6 +120,14 @@ fi
 success "Ditto successfully installed to $INSTALL_DIR/ditto!"
 printf "\n"
 
+info "Starting Ditto background daemon..."
+if "$INSTALL_DIR/ditto" start >/dev/null 2>&1; then
+  success "Ditto background daemon started and desktop autostart registered!"
+else
+  warn "Could not start daemon automatically. You can start it manually with: ditto start"
+fi
+printf "\n"
+
 case ":$PATH:" in
   *":$HOME/.local/bin:"*)
     ;;
@@ -130,5 +138,10 @@ case ":$PATH:" in
     ;;
 esac
 
-info "To start Ditto daemon:  ditto start"
-info "To toggle visibility:  ditto toggle"
+info "================================================================"
+info "                     Keybinding Setup                           "
+info "================================================================"
+info "To open Ditto with a keyboard shortcut, bind a global hotkey    "
+info "(e.g., Super+V or Ctrl+Alt+V) in your Linux system settings to: "
+printf "  \033[1;32mditto toggle\033[0m\n"
+info "================================================================"
