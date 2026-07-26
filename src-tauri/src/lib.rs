@@ -2,11 +2,14 @@ use tauri::{Emitter, Manager, WindowEvent};
 use std::sync::Mutex;
 use std::time::Instant;
 
-struct AppState {
-    db: ditto_core::db::Db,
-    last_shown: Mutex<Option<Instant>>,
-    is_paused: std::sync::atomic::AtomicBool,
-    config: Mutex<ditto_core::config::Config>,
+pub mod ipc;
+pub mod platform;
+
+pub struct AppState {
+    pub db: ditto_core::db::Db,
+    pub last_shown: Mutex<Option<Instant>>,
+    pub is_paused: std::sync::atomic::AtomicBool,
+    pub config: Mutex<ditto_core::config::Config>,
 }
 
 #[tauri::command]
@@ -20,7 +23,11 @@ fn get_history(
 
 #[tauri::command]
 fn select_item(app_handle: tauri::AppHandle, content: String) -> Result<(), String> {
-    ditto_core::clipboard::set_text(&content).map_err(|e| e.to_string())?;
+    if let Err(e) = ditto_core::clipboard::set_text(&content) {
+        eprintln!("Failed to write to clipboard: {}", e);
+        return Err(e.to_string());
+    }
+
     if let Some(window) = app_handle.get_webview_window("main") {
         let _ = window.hide();
     }
@@ -47,8 +54,11 @@ fn get_config(state: tauri::State<'_, AppState>) -> Result<ditto_core::config::C
 
 #[tauri::command]
 fn save_config(state: tauri::State<'_, AppState>, config: ditto_core::config::Config) -> Result<(), String> {
-    config.save().map_err(|e| e.to_string())?;
-    *state.config.lock().unwrap() = config;
+    if let Err(e) = config.save() {
+        return Err(e.to_string());
+    }
+    let mut current = state.config.lock().unwrap();
+    *current = config;
     Ok(())
 }
 
@@ -60,145 +70,7 @@ fn is_paused(state: tauri::State<'_, AppState>) -> bool {
 #[tauri::command]
 fn set_paused(state: tauri::State<'_, AppState>, app_handle: tauri::AppHandle, paused: bool) {
     state.is_paused.store(paused, std::sync::atomic::Ordering::SeqCst);
-    let _ = app_handle.emit("pause-updated", paused);
-}
-
-fn socket_path() -> std::path::PathBuf {
-    std::env::var("XDG_RUNTIME_DIR")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|_| std::path::PathBuf::from("/tmp"))
-        .join("ditto.sock")
-}
-
-fn focus_by_pid() {
-    let pid = std::process::id();
-    if let Ok(output) = std::process::Command::new("wmctrl").args(["-lp"]).output() {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        for line in stdout.lines() {
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() >= 3 {
-                let win_id = parts[0];
-                let win_pid = parts[2];
-                if win_pid == pid.to_string() {
-                    let _ = std::process::Command::new("wmctrl")
-                        .args(["-i", "-a", win_id])
-                        .spawn();
-                }
-            }
-        }
-    }
-}
-
-fn get_active_window_class() -> Option<String> {
-    // 1. Get the active window ID using xprop -root _NET_ACTIVE_WINDOW
-    let output = std::process::Command::new("xprop")
-        .args(["-root", "_NET_ACTIVE_WINDOW"])
-        .output()
-        .ok()?;
-    
-    if !output.status.success() {
-        return None;
-    }
-    
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    // Parse output like: _NET_ACTIVE_WINDOW(WINDOW): window id # 0x3800458
-    let win_id = stdout
-        .split('#')
-        .last()?
-        .trim();
-    
-    if win_id.is_empty() || win_id == "0x0" {
-        return None;
-    }
-    
-    // 2. Get the WM_CLASS for this window ID
-    let class_output = std::process::Command::new("xprop")
-        .args(["-id", win_id, "WM_CLASS"])
-        .output()
-        .ok()?;
-        
-    if !class_output.status.success() {
-        return None;
-    }
-    
-    let class_stdout = String::from_utf8_lossy(&class_output.stdout);
-    Some(class_stdout.to_string())
-}
-
-fn start_socket_server(app_handle: tauri::AppHandle) {
-    let sock = socket_path();
-    let _ = std::fs::remove_file(&sock);
-
-    use std::os::unix::net::UnixListener;
-    use std::io::Read;
-
-    let listener = match UnixListener::bind(&sock) {
-        Ok(l) => l,
-        Err(e) => {
-            eprintln!("ditto: failed to bind socket: {}", e);
-            return;
-        }
-    };
-
-    std::thread::spawn(move || {
-        for stream in listener.incoming() {
-            let mut stream = match stream {
-                Ok(s) => s,
-                Err(_) => continue,
-            };
-
-            let mut buf = [0u8; 32];
-            let n = match stream.read(&mut buf) {
-                Ok(n) => n,
-                Err(_) => continue,
-            };
-
-            let msg = String::from_utf8_lossy(&buf[..n]);
-            let cmd = msg.trim();
-
-            if cmd == "toggle" {
-                if let Some(window) = app_handle.get_webview_window("main") {
-                    let visible = window.is_visible().unwrap_or(false);
-                    if visible {
-                        let _ = window.hide();
-                    } else {
-                        if let Some(state) = app_handle.try_state::<AppState>() {
-                            if let Ok(mut last_shown) = state.last_shown.lock() {
-                                *last_shown = Some(Instant::now());
-                            }
-                        }
-                        let _ = window.show();
-                        let _ = window.unminimize();
-                        let _ = window.set_focus();
-
-                        focus_by_pid();
-
-                        let w = window.clone();
-                        std::thread::spawn(move || {
-                            std::thread::sleep(std::time::Duration::from_millis(80));
-                            let _ = w.set_focus();
-                            focus_by_pid();
-                        });
-                    }
-                }
-            } else if cmd == "clear" {
-                if let Some(state) = app_handle.try_state::<AppState>() {
-                    let _ = state.db.clear_history();
-                    let _ = app_handle.emit("clipboard-updated", ());
-                }
-            } else if cmd == "pause" {
-                if let Some(state) = app_handle.try_state::<AppState>() {
-                    state.is_paused.store(true, std::sync::atomic::Ordering::SeqCst);
-                    let _ = app_handle.emit("pause-updated", true);
-                }
-            } else if cmd == "resume" {
-                if let Some(state) = app_handle.try_state::<AppState>() {
-                    state.is_paused.store(false, std::sync::atomic::Ordering::SeqCst);
-                    let _ = app_handle.emit("pause-updated", false);
-                }
-            }
-        }
-    });
+    let _ = app_handle.emit("pause-status-changed", paused);
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -250,7 +122,6 @@ pub fn run() {
             let app_handle_state = app.handle().clone();
             std::thread::spawn(move || {
                 for text in rx {
-                    // Check if clipboard monitoring is paused and get config
                     let active_config = if let Some(state) = app_handle_state.try_state::<AppState>() {
                         if state.is_paused.load(std::sync::atomic::Ordering::SeqCst) {
                             continue;
@@ -260,9 +131,8 @@ pub fn run() {
                         ditto_core::config::Config::load()
                     };
 
-                    // Check if the currently active window matches any ignored application keyword
                     let mut ignore = false;
-                    if let Some(active_window) = get_active_window_class() {
+                    if let Some(active_window) = platform::get_active_window_class() {
                         let active_window_lower = active_window.to_lowercase();
                         for app_name in &active_config.ignored_apps {
                             if active_window_lower.contains(&app_name.to_lowercase()) {
@@ -281,8 +151,7 @@ pub fn run() {
                 }
             });
 
-            // Start Unix socket server for `ditto toggle`
-            start_socket_server(app.handle().clone());
+            ipc::start_ipc_server(app.handle().clone());
 
             Ok(())
         })

@@ -16,6 +16,8 @@ jobs:
         include:
           - platform: ubuntu-22.04
             args: '--bundles appimage,deb'
+          - platform: macos-latest
+            args: '--bundles dmg,app'
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -41,6 +43,7 @@ jobs:
           workspaces: './src-tauri -> target'
 
       - name: Install Linux dependencies
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev

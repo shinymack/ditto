@@ -1,25 +1,9 @@
-// Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-
-use std::io::Write;
-use std::os::unix::net::UnixStream;
-
-const ICON_BYTES: &[u8] = include_bytes!("../icons/icon.png");
-
-fn runtime_dir() -> std::path::PathBuf {
-    std::env::var("XDG_RUNTIME_DIR")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|_| std::path::PathBuf::from("/tmp"))
-}
-
-fn socket_path() -> std::path::PathBuf {
-    runtime_dir().join("ditto.sock")
-}
 
 fn print_help() {
     let art = "\x1b[1;33m  ____  _ _   _\n |  _ \\(_) |_| |_ ___\n | | | | | __| __/ _ \\\n | |_| | | |_| || (_) |\n |____/|_|\\__|\\__\\___/\x1b[0m";
     println!("{}", art);
-    println!("  \x1b[1;37mDitto\x1b[0m \x1b[90m-\x1b[0m A lightweight, keyboard-driven Linux clipboard manager.");
+    println!("  \x1b[1;37mDitto\x1b[0m \x1b[90m-\x1b[0m A lightweight, keyboard-driven clipboard manager.");
     println!("  \x1b[90mBuilt with Tauri v2, Rust, React, and TypeScript.\x1b[0m");
     println!();
     println!("  \x1b[1;33mUSAGE:\x1b[0m");
@@ -40,39 +24,6 @@ fn print_help() {
     println!("    {}", ditto_core::config::Config::file_path().display());
 }
 
-fn setup_autostart() {
-    let Ok(exe) = std::env::current_exe() else { return };
-    
-    // Install the embedded icon to standard user-local icon theme directory
-    let mut icon_path = std::path::PathBuf::from("/tmp/ditto.png");
-    if let Some(data_dir) = dirs::data_dir() {
-        let icon_dir = data_dir.join("icons/hicolor/512x512/apps");
-        let _ = std::fs::create_dir_all(&icon_dir);
-        let icon_file = icon_dir.join("ditto.png");
-        let _ = std::fs::write(&icon_file, ICON_BYTES);
-        icon_path = icon_file;
-    }
-
-    // Configure the autostart to run "ditto run"
-    let content = format!(
-        "[Desktop Entry]\nType=Application\nName=Ditto\nExec={} run\nHidden=false\nX-GNOME-Autostart-enabled=true\nComment=Keyboard-driven clipboard manager\nIcon={}\nTerminal=false\nCategories=Utility;\nStartupWMClass=ditto\n",
-        exe.display(),
-        icon_path.display()
-    );
-
-    // 1. Write to autostart
-    if let Some(autostart_dir) = dirs::config_dir().map(|d| d.join("autostart")) {
-        let _ = std::fs::create_dir_all(&autostart_dir);
-        let _ = std::fs::write(autostart_dir.join("ditto.desktop"), &content);
-    }
-
-    // 2. Write to applications directory for window manager WM_CLASS resolution
-    if let Some(apps_dir) = dirs::data_dir().map(|d| d.join("applications")) {
-        let _ = std::fs::create_dir_all(&apps_dir);
-        let _ = std::fs::write(apps_dir.join("ditto.desktop"), &content);
-    }
-}
-
 fn main() {
     let mut args = std::env::args().skip(1);
     let cmd = args.next();
@@ -85,10 +36,7 @@ fn main() {
             print_help();
         }
         Some("toggle") => {
-            if let Ok(mut stream) = UnixStream::connect(socket_path()) {
-                let _ = stream.write_all(b"toggle");
-            } else {
-                // Daemon not running, spin it up!
+            if ditto_lib::ipc::send_command("toggle").is_err() {
                 if let Ok(exe) = std::env::current_exe() {
                     let _ = std::process::Command::new(exe)
                         .arg("run")
@@ -96,17 +44,13 @@ fn main() {
                         .stdout(std::process::Stdio::null())
                         .stderr(std::process::Stdio::null())
                         .spawn();
-                    // Wait for daemon to initialize and bind socket
-                    std::thread::sleep(std::time::Duration::from_millis(350));
-                    if let Ok(mut stream) = UnixStream::connect(socket_path()) {
-                        let _ = stream.write_all(b"toggle");
-                    }
+                    std::thread::sleep(std::time::Duration::from_millis(400));
+                    let _ = ditto_lib::ipc::send_command("toggle");
                 }
             }
         }
         Some("clear") => {
-            if let Ok(mut stream) = UnixStream::connect(socket_path()) {
-                let _ = stream.write_all(b"clear");
+            if ditto_lib::ipc::send_command("clear").is_ok() {
                 println!("ditto: cleared history successfully");
             } else {
                 eprintln!("ditto: error: daemon is not running");
@@ -114,8 +58,7 @@ fn main() {
             }
         }
         Some("pause") => {
-            if let Ok(mut stream) = UnixStream::connect(socket_path()) {
-                let _ = stream.write_all(b"pause");
+            if ditto_lib::ipc::send_command("pause").is_ok() {
                 println!("ditto: clipboard monitoring paused");
             } else {
                 eprintln!("ditto: error: daemon is not running");
@@ -123,8 +66,7 @@ fn main() {
             }
         }
         Some("resume") => {
-            if let Ok(mut stream) = UnixStream::connect(socket_path()) {
-                let _ = stream.write_all(b"resume");
+            if ditto_lib::ipc::send_command("resume").is_ok() {
                 println!("ditto: clipboard monitoring resumed");
             } else {
                 eprintln!("ditto: error: daemon is not running");
@@ -159,7 +101,7 @@ fn main() {
             }
         }
         Some("start") => {
-            if UnixStream::connect(socket_path()).is_ok() {
+            if ditto_lib::ipc::is_daemon_running() {
                 println!("ditto: daemon is already running");
                 return;
             }
@@ -174,12 +116,12 @@ fn main() {
             }
         }
         Some("status") => {
-            let running = UnixStream::connect(socket_path()).is_ok();
+            let running = ditto_lib::ipc::is_daemon_running();
             let db_path = dirs::data_local_dir()
                 .unwrap_or_else(|| std::path::PathBuf::from("."))
                 .join("com.shinymack.ditto")
                 .join("ditto.db");
-            
+
             let (db_size, item_count) = if db_path.exists() {
                 let size = std::fs::metadata(&db_path).map(|m| m.len()).unwrap_or(0);
                 let count = ditto_core::db::Db::init(db_path.to_str().unwrap())
@@ -213,11 +155,11 @@ fn main() {
             println!("  Config File:    {}", ditto_core::config::Config::file_path().display());
         }
         Some("run") => {
-            if UnixStream::connect(socket_path()).is_ok() {
+            if ditto_lib::ipc::is_daemon_running() {
                 eprintln!("ditto: error: daemon is already running");
                 std::process::exit(1);
             }
-            setup_autostart();
+            ditto_lib::platform::setup_autostart();
             ditto_lib::run();
         }
         Some(unknown) => {
