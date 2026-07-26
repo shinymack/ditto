@@ -2,7 +2,11 @@ use std::path::PathBuf;
 
 #[cfg(windows)]
 pub fn get_active_window_class() -> Option<String> {
-    use windows_sys::Win32::Foundation::CloseHandle;
+    if let Ok(win) = x_win::get_active_window() {
+        if !win.info.name.is_empty() {
+            return Some(win.info.name);
+        }
+    }
     use windows_sys::Win32::System::ProcessStatus::GetModuleFileNameExW;
     use windows_sys::Win32::System::Threading::{
         OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ,

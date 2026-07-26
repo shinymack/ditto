@@ -2,7 +2,74 @@ use std::path::PathBuf;
 
 const ICON_BYTES: &[u8] = include_bytes!("../../icons/icon.png");
 
+fn find_focused_sway_node(node: &serde_json::Value) -> Option<String> {
+    if node.get("focused").and_then(|f| f.as_bool()) == Some(true) {
+        if let Some(app_id) = node.get("app_id").and_then(|a| a.as_str()) {
+            return Some(app_id.to_string());
+        }
+        if let Some(class) = node.get("window_properties").and_then(|w| w.get("class")).and_then(|c| c.as_str()) {
+            return Some(class.to_string());
+        }
+    }
+    if let Some(nodes) = node.get("nodes").and_then(|n| n.as_array()) {
+        for child in nodes {
+            if let Some(res) = find_focused_sway_node(child) {
+                return Some(res);
+            }
+        }
+    }
+    if let Some(floating) = node.get("floating_nodes").and_then(|n| n.as_array()) {
+        for child in floating {
+            if let Some(res) = find_focused_sway_node(child) {
+                return Some(res);
+            }
+        }
+    }
+    None
+}
+
 pub fn get_active_window_class() -> Option<String> {
+    if let Ok(win) = x_win::get_active_window() {
+        if !win.info.name.is_empty() {
+            return Some(win.info.name);
+        }
+    }
+    if std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some() {
+        if let Ok(output) = std::process::Command::new("hyprctl")
+            .args(["activewindow", "-j"])
+            .output()
+        {
+            if output.status.success() {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&stdout) {
+                    if let Some(class) = json.get("class").and_then(|c| c.as_str()) {
+                        if !class.is_empty() {
+                            return Some(class.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. Sway Wayland Query
+    if std::env::var_os("SWAYSOCK").is_some() {
+        if let Ok(output) = std::process::Command::new("swaymsg")
+            .args(["-t", "get_tree"])
+            .output()
+        {
+            if output.status.success() {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&stdout) {
+                    if let Some(app_id) = find_focused_sway_node(&json) {
+                        return Some(app_id);
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. X11 / XWayland Fallback via xprop
     let output = std::process::Command::new("xprop")
         .args(["-root", "_NET_ACTIVE_WINDOW"])
         .output()

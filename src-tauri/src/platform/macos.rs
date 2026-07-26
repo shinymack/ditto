@@ -1,6 +1,11 @@
 use std::process::Command;
 
 pub fn get_active_window_class() -> Option<String> {
+    if let Ok(win) = x_win::get_active_window() {
+        if !win.info.name.is_empty() {
+            return Some(win.info.name);
+        }
+    }
     let output = Command::new("osascript")
         .args([
             "-e",
