@@ -29,27 +29,38 @@ if ! has_cmd curl && ! has_cmd wget; then
 fi
 
 # 2. OS & Architecture Detection
-OS="$(uname -s)"
-ARCH="$(uname -m)"
+RAW_OS="$(uname -s)"
+RAW_ARCH="$(uname -m)"
 
-case "$OS" in
+case "$RAW_OS" in
   Linux*)
-    OS="linux"
+    SYSTEM_OS="linux"
+    ;;
+  Darwin*)
+    SYSTEM_OS="darwin"
     ;;
   *)
-    error "Ditto is currently only supported on Linux."
+    error "Ditto is currently only supported on Linux and macOS."
     ;;
 esac
 
-case "$ARCH" in
+case "$RAW_ARCH" in
   x86_64|amd64)
-    ASSET_NAMES="ditto-linux-x86_64 ditto_linux_x64 ditto"
+    if [ "$SYSTEM_OS" = "darwin" ]; then
+      ASSET_NAMES="ditto_darwin_x86_64 ditto-darwin-x86_64 ditto_darwin_aarch64 ditto"
+    else
+      ASSET_NAMES="ditto-linux-x86_64 ditto_linux_x64 ditto"
+    fi
     ;;
   aarch64|arm64)
-    ASSET_NAMES="ditto-linux-aarch64 ditto_linux_arm64 ditto"
+    if [ "$SYSTEM_OS" = "darwin" ]; then
+      ASSET_NAMES="ditto_darwin_aarch64 ditto-darwin-aarch64 ditto"
+    else
+      ASSET_NAMES="ditto-linux-aarch64 ditto_linux_aarch64 ditto"
+    fi
     ;;
   *)
-    error "Unsupported architecture: $ARCH"
+    error "Unsupported architecture: $RAW_ARCH"
     ;;
 esac
 
@@ -75,13 +86,25 @@ get_latest_tag() {
 }
 
 download_file() {
+  set +e
   _url="$1"
   _dest="$2"
+  _tmp="${_dest}.tmp"
+  _res=1
   if has_cmd curl; then
-    curl -fsSL "$_url" -o "$_dest" 2>/dev/null
+    curl -fsSL "$_url" -o "$_tmp" 2>/dev/null
+    _res=$?
   elif has_cmd wget; then
-    wget -qO "$_dest" "$_url" 2>/dev/null
+    wget -qO "$_tmp" "$_url" 2>/dev/null
+    _res=$?
   fi
+  if [ "$_res" -eq 0 ]; then
+    mv -f "$_tmp" "$_dest"
+  else
+    rm -f "$_tmp"
+  fi
+  set -e
+  return $_res
 }
 
 info "=== Installing Ditto Clipboard Manager ==="
@@ -122,7 +145,7 @@ printf "\n"
 
 info "Starting Ditto background daemon..."
 if "$INSTALL_DIR/ditto" start >/dev/null 2>&1; then
-  success "Ditto background daemon started and desktop autostart registered!"
+  success "Ditto background daemon started and autostart registered!"
 else
   warn "Could not start daemon automatically. You can start it manually with: ditto start"
 fi
@@ -141,7 +164,12 @@ esac
 info "================================================================"
 info "                     Keybinding Setup                           "
 info "================================================================"
-info "To open Ditto with a keyboard shortcut, bind a global hotkey    "
-info "(e.g., Super+V or Ctrl+Alt+V) in your Linux system settings to: "
+if [ "$SYSTEM_OS" = "darwin" ]; then
+  info "To open Ditto with a keyboard shortcut, configure a hotkey      "
+  info "(e.g., Cmd+Shift+V) in macOS System Settings / Shortcuts to:    "
+else
+  info "To open Ditto with a keyboard shortcut, bind a global hotkey    "
+  info "(e.g., Super+V or Ctrl+Alt+V) in your system settings to:       "
+fi
 printf "  \033[1;32mditto toggle\033[0m\n"
 info "================================================================"
