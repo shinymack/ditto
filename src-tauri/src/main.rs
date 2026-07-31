@@ -11,6 +11,7 @@ fn print_help() {
     println!();
     println!("  \x1b[1;33mCOMMANDS:\x1b[0m");
     println!("    \x1b[1;37mstart\x1b[0m       Start the Ditto daemon in the background (detached)");
+    println!("    \x1b[1;37mstop\x1b[0m        Stop the running Ditto daemon");
     println!("    \x1b[1;37mrun\x1b[0m         Run the Ditto daemon in the foreground");
     println!("    \x1b[1;37mtoggle\x1b[0m      Toggle window visibility (shows if hidden, hides if visible)");
     println!("    \x1b[1;37mclear\x1b[0m       Clear all clipboard history");
@@ -18,6 +19,7 @@ fn print_help() {
     println!("    \x1b[1;37mresume\x1b[0m      Resume clipboard monitoring");
     println!("    \x1b[1;37mlist\x1b[0m        List last 50 clipboard items");
     println!("    \x1b[1;37mstatus\x1b[0m      Show daemon process state, database size, and configuration");
+    println!("    \x1b[1;37mupdate\x1b[0m      Update Ditto to the latest release and restart daemon");
     println!("    \x1b[1;37m-h, --help\x1b[0m  Show this help message");
     println!();
     println!("  \x1b[1;33mCONFIG FILE:\x1b[0m");
@@ -113,6 +115,49 @@ fn main() {
                     .stderr(std::process::Stdio::null())
                     .spawn();
                 println!("ditto: daemon started in the background");
+            }
+        }
+        Some("stop") => {
+            if ditto_lib::ipc::send_command("stop").is_ok() {
+                println!("ditto: daemon stopped");
+            } else {
+                println!("ditto: daemon is not running");
+            }
+        }
+        Some("update") => {
+            println!("ditto: checking for updates...");
+            let was_running = ditto_lib::ipc::is_daemon_running();
+            if was_running {
+                println!("ditto: stopping running daemon...");
+                let _ = ditto_lib::ipc::send_command("stop");
+                std::thread::sleep(std::time::Duration::from_millis(500));
+            }
+
+            println!("ditto: running installer script...");
+            let install_status = std::process::Command::new("sh")
+                .arg("-c")
+                .arg("curl -fsSL https://raw.githubusercontent.com/shinymack/ditto/main/install.sh | sh")
+                .status();
+
+            match install_status {
+                Ok(status) if status.success() => {
+                    println!("ditto: updated successfully!");
+                    if was_running {
+                        println!("ditto: restarting daemon...");
+                        if let Ok(exe) = std::env::current_exe() {
+                            let _ = std::process::Command::new(exe)
+                                .arg("run")
+                                .stdin(std::process::Stdio::null())
+                                .stdout(std::process::Stdio::null())
+                                .stderr(std::process::Stdio::null())
+                                .spawn();
+                        }
+                    }
+                }
+                _ => {
+                    eprintln!("ditto: error: update failed");
+                    std::process::exit(1);
+                }
             }
         }
         Some("status") => {

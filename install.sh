@@ -121,8 +121,10 @@ DOWNLOAD_SUCCESS=0
 for ASSET in $ASSET_NAMES; do
   DOWNLOAD_URL="https://github.com/shinymack/ditto/releases/download/${TAG}/${ASSET}"
   info "Trying to download binary (${ASSET})..."
-  if download_file "$DOWNLOAD_URL" "$INSTALL_DIR/ditto"; then
-    if [ -s "$INSTALL_DIR/ditto" ]; then
+  if download_file "$DOWNLOAD_URL" "$INSTALL_DIR/ditto.tmp"; then
+    if [ -s "$INSTALL_DIR/ditto.tmp" ]; then
+      chmod +x "$INSTALL_DIR/ditto.tmp"
+      mv -f "$INSTALL_DIR/ditto.tmp" "$INSTALL_DIR/ditto"
       DOWNLOAD_SUCCESS=1
       break
     fi

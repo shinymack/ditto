@@ -122,7 +122,13 @@ function SettingsView() {
   const [config, setConfig] = useState<Config | null>(null);
   const [ignoredAppsText, setIgnoredAppsText] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const [appVersion, setAppVersion] = useState("v1.0.0");
 
+  useEffect(() => {
+    import("@tauri-apps/api/app").then((m) => {
+      m.getVersion().then((v) => setAppVersion(`v${v}`)).catch(() => {});
+    });
+  }, []);
   useEffect(() => {
     const loadConfig = async () => {
       try {
@@ -199,6 +205,9 @@ function SettingsView() {
           Ditto Settings
         </h1>
         <div className="flex items-center gap-2">
+          <span className="text-[9px] text-[var(--accent-primary)] bg-[rgba(255,255,255,0.04)] px-2 py-0.5 rounded border border-[rgba(255,255,255,0.06)] font-mono font-semibold">
+            {appVersion}
+          </span>
           <span className="text-[9px] text-[var(--text-secondary)] bg-[rgba(255,255,255,0.04)] px-2 py-0.5 rounded border border-[rgba(255,255,255,0.06)] font-mono">
             config.json
           </span>

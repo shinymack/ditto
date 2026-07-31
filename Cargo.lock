@@ -947,7 +947,7 @@ dependencies = [
 
 [[package]]
 name = "ditto"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "dirs 5.0.1",
  "ditto-core",
@@ -962,7 +962,7 @@ dependencies = [
 
 [[package]]
 name = "ditto-core"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "base64 0.22.1",
  "clipboard-rs",

@@ -83,6 +83,11 @@ pub fn handle_ipc_command(app_handle: &tauri::AppHandle, msg: &str) {
                 let _ = app_handle.emit("pause-status-changed", false);
             }
         }
+        "stop" => {
+            let path = socket_path();
+            let _ = std::fs::remove_file(&path);
+            std::process::exit(0);
+        }
         _ => {}
     }
 }

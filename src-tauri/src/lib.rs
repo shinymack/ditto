@@ -98,6 +98,11 @@ pub fn run() {
             }
         })
         .setup(|app| {
+            #[cfg(target_os = "macos")]
+            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.set_visible_on_all_workspaces(true);
+            }
             let app_data_dir = app
                 .path()
                 .app_local_data_dir()
