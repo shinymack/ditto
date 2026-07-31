@@ -49,9 +49,9 @@
   --accent-hover: #e11d48;
 }
 
-body {
-  background-color: transparent;
-  color: var(--text-primary);
+html, body {
+  background: transparent !important;
+  background-color: transparent !important;
   font-family: var(--font-sans);
   margin: 0;
   padding: 0;
