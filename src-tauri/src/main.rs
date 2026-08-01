@@ -3,8 +3,7 @@
 fn print_help() {
     let art = "\x1b[1;33m  ____  _ _   _\n |  _ \\(_) |_| |_ ___\n | | | | | __| __/ _ \\\n | |_| | | |_| || (_) |\n |____/|_|\\__|\\__\\___/\x1b[0m";
     println!("{}", art);
-    println!("  \x1b[1;37mDitto\x1b[0m \x1b[90m-\x1b[0m A lightweight, keyboard-driven clipboard manager.");
-    println!("  \x1b[90mBuilt with Tauri v2, Rust, React, and TypeScript.\x1b[0m");
+    println!("  \x1b[1;37mDitto\x1b[0m \x1b[90mv{}\x1b[0m \x1b[90m-\x1b[0m A lightweight, keyboard-driven clipboard manager.", env!("CARGO_PKG_VERSION"));
     println!();
     println!("  \x1b[1;33mUSAGE:\x1b[0m");
     println!("    ditto [COMMAND]");
@@ -20,8 +19,8 @@ fn print_help() {
     println!("    \x1b[1;37mlist\x1b[0m        List last 50 clipboard items");
     println!("    \x1b[1;37mstatus\x1b[0m      Show daemon process state, database size, and configuration");
     println!("    \x1b[1;37mupdate\x1b[0m      Update Ditto to the latest release and restart daemon");
+    println!("    \x1b[1;37m-v, --version\x1b[0m Show version information");
     println!("    \x1b[1;37m-h, --help\x1b[0m  Show this help message");
-    println!();
     println!("  \x1b[1;33mCONFIG FILE:\x1b[0m");
     println!("    {}", ditto_core::config::Config::file_path().display());
 }
@@ -33,6 +32,9 @@ fn main() {
     match cmd.as_deref() {
         Some("-h" | "--help") => {
             print_help();
+        }
+        Some("-v" | "--version" | "version") => {
+            println!("ditto v{}", env!("CARGO_PKG_VERSION"));
         }
         None => {
             print_help();
@@ -194,6 +196,7 @@ fn main() {
 
             println!("\x1b[1;33mDitto Daemon Status:\x1b[0m");
             println!("  Daemon Process: {}", status_str);
+            println!("  App Version:    v{}", env!("CARGO_PKG_VERSION"));
             println!("  Database Path:  {}", db_path.display());
             println!("  Database Size:  {}", formatted_size);
             println!("  History Count:  {} items", item_count);

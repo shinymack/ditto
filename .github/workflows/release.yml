@@ -12,12 +12,13 @@ jobs:
       contents: write
     strategy:
       fail-fast: false
-      matrix:
         include:
           - platform: ubuntu-22.04
             args: '--bundles appimage,deb'
           - platform: macos-latest
             args: '--bundles dmg,app'
+          - platform: windows-latest
+            args: '--bundles nsis'
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -67,11 +68,17 @@ jobs:
           args: ${{ matrix.args }}
 
       - name: Upload standalone binary
+        shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if [ -f "target/release/ditto" ]; then
-            gh release upload ${{ github.ref_name }} target/release/ditto#ditto-linux-x86_64 --clobber
-          elif [ -f "src-tauri/target/release/ditto" ]; then
-            gh release upload ${{ github.ref_name }} src-tauri/target/release/ditto#ditto-linux-x86_64 --clobber
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            [ -f "target/release/ditto" ] && gh release upload ${{ github.ref_name }} target/release/ditto#ditto-linux-x86_64 --clobber || true
+            [ -f "src-tauri/target/release/ditto" ] && gh release upload ${{ github.ref_name }} src-tauri/target/release/ditto#ditto-linux-x86_64 --clobber || true
+          elif [ "${{ runner.os }}" = "Windows" ]; then
+            [ -f "target/release/ditto.exe" ] && gh release upload ${{ github.ref_name }} target/release/ditto.exe#ditto_windows_x86_64.exe --clobber || true
+            [ -f "src-tauri/target/release/ditto.exe" ] && gh release upload ${{ github.ref_name }} src-tauri/target/release/ditto.exe#ditto_windows_x86_64.exe --clobber || true
+          elif [ "${{ runner.os }}" = "macOS" ]; then
+            [ -f "target/release/ditto" ] && gh release upload ${{ github.ref_name }} target/release/ditto#ditto-darwin-x86_64 --clobber || true
+            [ -f "src-tauri/target/release/ditto" ] && gh release upload ${{ github.ref_name }} src-tauri/target/release/ditto#ditto-darwin-x86_64 --clobber || true
           fi
