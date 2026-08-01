@@ -12,22 +12,35 @@ $targetPath = "$installDir\ditto.exe"
 $tempPath = "$installDir\ditto.exe.tmp"
 
 # Try downloading precompiled binary from GitHub Releases
+$downloadSuccess = $false
 try {
     Write-Host "Fetching latest release version..." -ForegroundColor Cyan
     $releaseUrl = "https://api.github.com/repos/$repo/releases/latest"
     $latestRelease = Invoke-RestMethod -Uri $releaseUrl -Headers @{ "User-Agent" = "DittoInstaller" }
     $tag = $latestRelease.tag_name
 
-    Write-Host "Downloading Ditto $tag for Windows..." -ForegroundColor Cyan
-    $downloadUrl = "https://github.com/$repo/releases/download/$tag/ditto_windows_x86_64.exe"
-    Invoke-WebRequest -Uri $downloadUrl -OutFile $tempPath -UseBasicParsing
-
-    if (Test-Path $tempPath) {
-        Move-Item -Path $tempPath -Destination $targetPath -Force
-        Write-Host "Successfully downloaded and installed Ditto $tag!" -ForegroundColor Green
+    $assetCandidates = @("ditto_windows_x64.exe", "ditto_windows_x86_64.exe", "ditto.exe")
+    foreach ($asset in $assetCandidates) {
+        $downloadUrl = "https://github.com/$repo/releases/download/$tag/$asset"
+        Write-Host "Trying download ($asset)..." -ForegroundColor Cyan
+        try {
+            Invoke-WebRequest -Uri $downloadUrl -OutFile $tempPath -UseBasicParsing -ErrorAction Stop
+            if ((Test-Path $tempPath) -and ((Get-Item $tempPath).Length -gt 1000)) {
+                Move-Item -Path $tempPath -Destination $targetPath -Force
+                $downloadSuccess = $true
+                Write-Host "Successfully downloaded and installed Ditto $tag!" -ForegroundColor Green
+                break
+            }
+        } catch {
+            if (Test-Path $tempPath) { Remove-Item $tempPath -Force }
+        }
     }
 } catch {
-    Write-Host "Downloading precompiled binary failed. Checking for local cargo build..." -ForegroundColor Yellow
+    Write-Host "Unable to contact GitHub Releases API." -ForegroundColor Yellow
+}
+
+if (-not $downloadSuccess) {
+    Write-Host "Downloading release binary failed. Checking for local cargo build..." -ForegroundColor Yellow
     if ((Get-Command "cargo" -ErrorAction SilentlyContinue) -and (Get-Command "bun" -ErrorAction SilentlyContinue)) {
         Write-Host "Building release binary locally..." -ForegroundColor Cyan
         bun run build

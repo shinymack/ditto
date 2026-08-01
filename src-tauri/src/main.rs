@@ -37,7 +37,10 @@ fn main() {
             println!("ditto v{}", env!("CARGO_PKG_VERSION"));
         }
         None => {
-            print_help();
+            if ditto_lib::ipc::send_command("toggle").is_err() {
+                ditto_lib::platform::setup_autostart();
+                ditto_lib::run();
+            }
         }
         Some("toggle") => {
             if ditto_lib::ipc::send_command("toggle").is_err() {

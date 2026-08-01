@@ -23,7 +23,7 @@ To keep Ditto extremely fast and light on resources, the project adheres to the 
 
 ## Installation
 
-### Linux & macOS
+### Linux & macOS (Terminal)
 
 Run this command in your terminal to install the latest precompiled release binary:
 
@@ -35,13 +35,18 @@ This installs the binary to `~/.local/bin/ditto`.
 
 ### Windows
 
-Run this command in PowerShell:
+You can install Ditto on Windows using either method below:
+
+#### Option A: GUI Installer (.exe Setup)
+1. Download **`ditto_1.0.0_x64-setup.exe`** from [Releases](https://github.com/shinymack/ditto/releases/latest).
+2. Double-click the downloaded setup file to launch the installation wizard.
+
+#### Option B: PowerShell Command Line
+Run this command in PowerShell to download and register the executable in `%LOCALAPPDATA%\Microsoft\WindowsApps`:
 
 ```powershell
 irm https://raw.githubusercontent.com/shinymack/ditto/main/install.ps1 | iex
 ```
-
-This installs the binary to `%LOCALAPPDATA%\Microsoft\WindowsApps\ditto.exe`.
 
 ---
 

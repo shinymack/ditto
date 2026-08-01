@@ -102,6 +102,8 @@ pub fn run() {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_visible_on_all_workspaces(true);
+                let _ = window.show();
+                let _ = window.set_focus();
             }
             let app_data_dir = app
                 .path()
