@@ -10,21 +10,53 @@
   <img src="https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB" alt="React" />
 </p>
 
-A lightweight, keyboard-driven clipboard manager for Linux. Built using Tauri v2, Rust, React, TypeScript, Vite, and Tailwind CSS v4.
+A lightweight, keyboard-driven, cross-platform clipboard manager built using Tauri v2, Rust, React, TypeScript, Vite, and Tailwind CSS v4.
 
 ## Core Constraints
 
 To keep Ditto extremely fast and light on resources, the project adheres to the following constraints:
 
-* **Resource Usage**: Designed to be lightweight, fast, and optimized for low memory usage.
-* **Window Design**: Frameless, transparent, centered, and hidden immediately upon window blur.
-* **Database (SQLite)**: Automatically floats duplicated clipboard entries to the top of the history.
+* **Resource Usage**: Optimized for low memory footprint (~30-50MB RAM).
+* **Window Design**: Frameless, transparent, centered, and hidden immediately on blur.
+* **Background Daemon**: Hides completely from macOS Dock and Cmd+Tab switcher, operating purely as a background utility.
+* **Database (SQLite)**: AES-256-GCM / Argon2id storage. Duplicate entries automatically float to top of history.
 
-## Repository Structure
+## Installation
 
-* `/crates/ditto-core`: Core Rust library handling SQLite operations and the clipboard listener.
-* `/src-tauri`: Desktop runner host that binds the frontend window and calls `ditto-core`.
-* `/app`: Frontend application built with React, TypeScript, and Vite.
+### Linux & macOS
+
+Run this command in your terminal to install the latest precompiled release binary:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/shinymack/ditto/main/install.sh | sh
+```
+
+This installs the binary to `~/.local/bin/ditto`.
+
+### Windows
+
+Run this command in PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/shinymack/ditto/main/install.ps1 | iex
+```
+
+This installs the binary to `%LOCALAPPDATA%\Microsoft\WindowsApps\ditto.exe`.
+
+---
+
+## CLI Usage
+
+Manage Ditto directly from your terminal or command prompt:
+
+- `ditto start` — Start background daemon
+- `ditto stop` — Stop background daemon
+- `ditto toggle` — Toggle window visibility
+- `ditto status` — Show process state, DB size, and config info
+- `ditto update` — Update Ditto to the latest release
+- `ditto -v`, `ditto --version` — Show version info
+
+---
 
 ## Development Setup
 
@@ -54,25 +86,3 @@ Ensure you have Rust/Cargo installed, and use `bun` for package management:
   ```bash
   bun run tauri build
   ```
-
-## Installation
-
-You can install Ditto on Linux without cloning or building the repository by running this command in your terminal:
-
-```bash
-curl -fsSL https://github.com/shinymack/ditto/raw/main/install.sh | sh
-```
-
-This script detects your platform, downloads the latest precompiled release binary, places it in `~/.local/bin/ditto`, and registers it with your desktop environment.
-
-If you prefer to build from source, you can clone this repository and run:
-
-```bash
-./install.sh
-```
-Once installed, you can start, pause, resume, toggle, or clear the history directly from your terminal using:
-- `ditto start` - Start daemon in background
-- `ditto toggle` - Toggle window visibility
-- `ditto pause` - Pause monitoring
-- `ditto resume` - Resume monitoring
-- `ditto clear` - Clear database history

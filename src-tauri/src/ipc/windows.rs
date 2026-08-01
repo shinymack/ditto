@@ -76,7 +76,7 @@ pub fn start_ipc_server(app_handle: tauri::AppHandle) {
                     let msg = String::from_utf8_lossy(&buf[..read_bytes as usize])
                         .trim()
                         .to_string();
-                    crate::ipc::unix::handle_ipc_command(&app_handle, &msg);
+                    crate::ipc::handle_ipc_command(&app_handle, &msg);
                 }
 
                 unsafe {
