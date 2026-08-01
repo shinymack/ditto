@@ -18,9 +18,22 @@ pub fn handle_ipc_command(app_handle: &tauri::AppHandle, msg: &str) {
                 if visible {
                     let _ = window.hide();
                 } else {
+                    if let Some(state) = app_handle.try_state::<crate::AppState>() {
+                        if let Ok(mut last_shown) = state.last_shown.lock() {
+                            *last_shown = Some(std::time::Instant::now());
+                        }
+                    }
                     let _ = window.show();
                     let _ = window.unminimize();
                     let _ = window.set_focus();
+                    crate::platform::focus_by_pid();
+
+                    let w = window.clone();
+                    std::thread::spawn(move || {
+                        std::thread::sleep(std::time::Duration::from_millis(80));
+                        let _ = w.set_focus();
+                        crate::platform::focus_by_pid();
+                    });
                 }
             }
         }

@@ -127,3 +127,21 @@ pub fn setup_autostart() {
         let _ = std::fs::write(apps_dir.join("ditto.desktop"), &content);
     }
 }
+pub fn focus_by_pid() {
+    let pid = std::process::id();
+    if let Ok(output) = std::process::Command::new("wmctrl").args(["-lp"]).output() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        for line in stdout.lines() {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 3 {
+                let win_id = parts[0];
+                let win_pid = parts[2];
+                if win_pid == pid.to_string() {
+                    let _ = std::process::Command::new("wmctrl")
+                        .args(["-i", "-a", win_id])
+                        .spawn();
+                }
+            }
+        }
+    }
+}

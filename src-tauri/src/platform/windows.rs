@@ -73,3 +73,4 @@ pub fn setup_autostart() {
         let _ = std::fs::write(bat_path, bat_content);
     }
 }
+pub fn focus_by_pid() {}

@@ -58,3 +58,4 @@ pub fn setup_autostart() {
         let _ = std::fs::write(plist_path, plist_content);
     }
 }
+pub fn focus_by_pid() {}

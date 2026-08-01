@@ -120,6 +120,11 @@ pub fn run() {
                 is_paused: std::sync::atomic::AtomicBool::new(false),
                 config: Mutex::new(config),
             });
+            if let Some(state) = app.try_state::<AppState>() {
+                if let Ok(mut last_shown) = state.last_shown.lock() {
+                    *last_shown = Some(Instant::now());
+                }
+            }
 
             let (tx, rx) = std::sync::mpsc::channel();
             ditto_core::clipboard::start_monitor(tx, None);
