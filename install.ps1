@@ -51,11 +51,20 @@ if (-not $downloadSuccess) {
     }
 }
 
+# Update PATH for current session and persistent User environment
+if ($env:Path -notlike "*$installDir*") {
+    $env:Path = "$installDir;$env:Path"
+}
+$userPath = [Environment]::GetEnvironmentVariable("Path", [EnvironmentVariableTarget]::User)
+if ($userPath -notlike "*$installDir*") {
+    [Environment]::SetEnvironmentVariable("Path", "$installDir;$userPath", [EnvironmentVariableTarget]::User)
+}
+
 Write-Host "Verifying binary execution..." -ForegroundColor Cyan
 try {
     & "$targetPath" -v
 } catch {}
 
-Write-Host "`nDitto installed successfully!" -ForegroundColor Green
+Write-Host "`nDitto installed successfully to $targetPath!" -ForegroundColor Green
 Write-Host "To start Ditto daemon:  ditto start" -ForegroundColor Yellow
 Write-Host "To toggle visibility:   ditto toggle" -ForegroundColor Yellow

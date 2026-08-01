@@ -50,6 +50,23 @@ irm https://raw.githubusercontent.com/shinymack/ditto/main/install.ps1 | iex
 
 ---
 
+## Windows Keybinding & Background Daemon Setup
+
+### 1. How the Daemon Starts
+- On Windows, Ditto creates an autostart entry at `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\ditto.bat`.
+- The background daemon starts automatically upon logging into Windows.
+- You can also start or stop it anytime in PowerShell with `ditto start` or `ditto stop`.
+
+### 2. Setting a Global Hotkey for `ditto toggle`
+- **Method A (Native Windows Shortcut Key)**:
+  Right-click `ditto.exe` (or Desktop shortcut) -> **Properties** -> Click **Shortcut key** field -> Press key combination (e.g., `Ctrl+Alt+V`) -> Click Apply.
+- **Method B (PowerToys Keyboard Manager)**:
+  Open PowerToys -> Keyboard Manager -> Remap a shortcut -> Target app: `ditto.exe` -> Args: `toggle`.
+- **Method C (AutoHotkey)**:
+  Add `^!v::Run "ditto toggle"` to your AutoHotkey script.
+
+---
+
 ## CLI Usage
 
 Manage Ditto directly from your terminal or command prompt:
