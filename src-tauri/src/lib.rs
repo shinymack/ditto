@@ -102,8 +102,6 @@ pub fn run() {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_visible_on_all_workspaces(true);
-                let _ = window.show();
-                let _ = window.set_focus();
             }
             let app_data_dir = app
                 .path()
@@ -120,11 +118,6 @@ pub fn run() {
                 is_paused: std::sync::atomic::AtomicBool::new(false),
                 config: Mutex::new(config),
             });
-            if let Some(state) = app.try_state::<AppState>() {
-                if let Ok(mut last_shown) = state.last_shown.lock() {
-                    *last_shown = Some(Instant::now());
-                }
-            }
 
             let (tx, rx) = std::sync::mpsc::channel();
             ditto_core::clipboard::start_monitor(tx, None);

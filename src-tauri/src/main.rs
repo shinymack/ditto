@@ -38,8 +38,16 @@ fn main() {
         }
         None => {
             if ditto_lib::ipc::send_command("toggle").is_err() {
-                ditto_lib::platform::setup_autostart();
-                ditto_lib::run();
+                if let Ok(exe) = std::env::current_exe() {
+                    let _ = std::process::Command::new(exe)
+                        .arg("run")
+                        .stdin(std::process::Stdio::null())
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null())
+                        .spawn();
+                    std::thread::sleep(std::time::Duration::from_millis(400));
+                    let _ = ditto_lib::ipc::send_command("toggle");
+                }
             }
         }
         Some("toggle") => {
