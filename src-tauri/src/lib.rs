@@ -73,6 +73,35 @@ fn set_paused(state: tauri::State<'_, AppState>, app_handle: tauri::AppHandle, p
     let _ = app_handle.emit("pause-status-changed", paused);
 }
 
+#[cfg(target_os = "macos")]
+fn setup_macos_fullscreen_auxiliary(window: &tauri::WebviewWindow) {
+    use std::ffi::c_void;
+    if let Ok(ns_win) = window.ns_window() {
+        let ns_win = ns_win as *mut c_void;
+        if !ns_win.is_null() {
+            unsafe {
+                extern "C" {
+                    fn sel_registerName(str: *const u8) -> *mut c_void;
+                    fn objc_msgSend();
+                }
+                let sel_set_collection_behavior = sel_registerName(b"setCollectionBehavior:\0".as_ptr());
+                let sel_set_level = sel_registerName(b"setLevel:\0".as_ptr());
+
+                let behavior: usize = (1 << 0) | (1 << 8);
+                let level: isize = 25;
+
+                let func_behavior: unsafe extern "C" fn(*mut c_void, *mut c_void, usize) =
+                    std::mem::transmute(objc_msgSend as *const ());
+                func_behavior(ns_win, sel_set_collection_behavior, behavior);
+
+                let func_level: unsafe extern "C" fn(*mut c_void, *mut c_void, isize) =
+                    std::mem::transmute(objc_msgSend as *const ());
+                func_level(ns_win, sel_set_level, level);
+            }
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -102,6 +131,8 @@ pub fn run() {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_visible_on_all_workspaces(true);
+                #[cfg(target_os = "macos")]
+                setup_macos_fullscreen_auxiliary(&window);
             }
             let app_data_dir = app
                 .path()
