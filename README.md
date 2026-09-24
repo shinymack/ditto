@@ -1,16 +1,16 @@
 # Ditto
 
 <p align="center">
-  <img src="src-tauri/icons/icon.png" width="160" height="160" alt="Ditto Logo" />
+  <img src="crates/ditto-gpui/assets/icon.png" width="160" height="160" alt="Ditto Logo" />
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/Rust-black?style=for-the-badge&logo=rust" alt="Rust" />
-  <img src="https://img.shields.io/badge/Tauri-FFC131?style=for-the-badge&logo=tauri&logoColor=white" alt="Tauri" />
-  <img src="https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB" alt="React" />
+  <img src="https://img.shields.io/badge/UI-GPUI%20Kit-blue?style=for-the-badge" alt="GPUI Kit" />
+  <img src="https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey?style=for-the-badge" alt="Platforms" />
 </p>
 
-A lightweight, keyboard-driven, cross-platform clipboard manager built using Tauri v2, Rust, React, TypeScript, Vite, and Tailwind CSS v4.
+A lightweight, keyboard-driven, cross-platform clipboard manager built with pure native Rust and GPUI Kit (`longbridge/gpui-kit`).
 
 ## Core Constraints
 
@@ -84,27 +84,24 @@ Manage Ditto directly from your terminal or command prompt:
 
 ### Prerequisites
 
-Ensure you have Rust/Cargo installed, and use `bun` for package management:
-
-* **Cargo**: Standard Rust toolchain.
-* **Bun**: `bun install` for frontend packages.
+Ensure you have the standard Rust/Cargo toolchain installed (`curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`).
 
 ### Commands
 
-* Run the development server (auto-rebuilds Tauri backend & React frontend):
+* Run Ditto in development mode:
 
   ```bash
-  bun run tauri dev
+  cargo run -p ditto-gpui -- run
   ```
 
-* Run Rust unit tests:
+* Run unit and search latency benchmark tests:
 
   ```bash
   cargo test --workspace
   ```
 
-* Build optimized release:
+* Build optimized release binary:
 
   ```bash
-  bun run tauri build
+  cargo build --release -p ditto-gpui
   ```

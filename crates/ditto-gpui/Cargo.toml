@@ -1,0 +1,36 @@
+[package]
+name = "ditto-gpui"
+version = "1.0.0"
+edition = "2021"
+
+[[bin]]
+name = "ditto"
+path = "src/main.rs"
+
+[dependencies]
+gpui-kit = "0.6"
+ditto-core = { path = "../ditto-core" }
+parking_lot = "0.12"
+chrono = "0.4"
+dirs = "5.0"
+smol = "2.0"
+rusqlite = { version = "0.40.1", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+image = { version = "0.25", default-features = false, features = ["png"] }
+base64 = "0.22"
+x-win = "5.7"
+[target.'cfg(target_os = "linux")'.dependencies]
+x11rb = "0.13"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_IO",
+    "Win32_System_Pipes",
+    "Win32_System_ProcessStatus",
+    "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging"
+] }

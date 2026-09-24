@@ -12,6 +12,10 @@ pub struct Config {
     pub custom_primary: String,
     pub custom_secondary: String,
     pub persistent_window: bool,
+    #[serde(default)]
+    pub window_x: Option<f32>,
+    #[serde(default)]
+    pub window_y: Option<f32>,
 }
 
 impl Default for Config {
@@ -30,6 +34,8 @@ impl Default for Config {
             custom_primary: "#f3f4f6".to_string(),
             custom_secondary: "#9ca3af".to_string(),
             persistent_window: false,
+            window_x: None,
+            window_y: None,
         }
     }
 }
@@ -54,7 +60,10 @@ impl Config {
             Ok(content) => match serde_json::from_str::<Self>(&content) {
                 Ok(config) => config,
                 Err(e) => {
-                    eprintln!("ditto: warning: config file corrupted ({}), resetting to defaults", e);
+                    eprintln!(
+                        "ditto: warning: config file corrupted ({}), resetting to defaults",
+                        e
+                    );
                     let default_config = Self::default();
                     let _ = default_config.save();
                     default_config

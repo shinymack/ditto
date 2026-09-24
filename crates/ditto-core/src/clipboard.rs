@@ -1,6 +1,8 @@
-use clipboard_rs::{Clipboard, ClipboardContext, ClipboardWatcher, ClipboardWatcherContext, ClipboardHandler};
-use clipboard_rs::common::RustImage;
 use base64::prelude::*;
+use clipboard_rs::common::RustImage;
+use clipboard_rs::{
+    Clipboard, ClipboardContext, ClipboardHandler, ClipboardWatcher, ClipboardWatcherContext,
+};
 use std::sync::mpsc::Sender;
 use std::thread;
 
@@ -44,10 +46,7 @@ impl ClipboardHandler for ClipboardReceiver {
     }
 }
 
-pub fn start_monitor(
-    sender: Sender<String>,
-    max_size: Option<usize>,
-) -> thread::JoinHandle<()> {
+pub fn start_monitor(sender: Sender<String>, max_size: Option<usize>) -> thread::JoinHandle<()> {
     let limit = max_size.unwrap_or(100 * 1024);
     thread::spawn(move || {
         let ctx = match ClipboardContext::new() {

@@ -17,7 +17,7 @@ pub struct Db {
 impl Db {
     pub fn init(path: &str) -> Result<Self> {
         let conn = Connection::open(path)?;
-        
+
         let version: i32 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
         if version < 1 {
             conn.execute(
@@ -100,6 +100,12 @@ impl Db {
         conn.execute("DELETE FROM history", [])?;
         Ok(())
     }
+
+    pub fn delete_item(&self, id: i64) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM history WHERE id = ?1", params![id])?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -131,6 +137,11 @@ mod tests {
         assert_eq!(history.len(), 1);
         assert_eq!(history[0].content, "hello");
 
+        let to_delete_id = history[0].id;
+        db.delete_item(to_delete_id).unwrap();
+        let history = db.get_history(10, None).unwrap();
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].content, "world");
         db.clear_history().unwrap();
         let history = db.get_history(10, None).unwrap();
         assert_eq!(history.len(), 0);

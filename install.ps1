@@ -41,9 +41,9 @@ try {
 
 if (-not $downloadSuccess) {
     Write-Host "Downloading release binary failed. Checking for local cargo build..." -ForegroundColor Yellow
-    if ((Get-Command "cargo" -ErrorAction SilentlyContinue) -and (Get-Command "bun" -ErrorAction SilentlyContinue)) {
-        Write-Host "Building release binary locally..." -ForegroundColor Cyan
-        bun run build
+    if (Get-Command "cargo" -ErrorAction SilentlyContinue) {
+        Write-Host "Building release binary locally via cargo..." -ForegroundColor Cyan
+        cargo build --release -p ditto-gpui
         Copy-Item "target\release\ditto.exe" $targetPath -Force
     } else {
         Write-Error "Could not download release binary or build locally. Please check your internet connection or install Rust/Cargo."

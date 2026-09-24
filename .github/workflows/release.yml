@@ -7,79 +7,81 @@ on:
       - 'v*'
 
 jobs:
-  release:
+  build-and-release:
+    name: Build (${{ matrix.target }})
     permissions:
       contents: write
     strategy:
       fail-fast: false
       matrix:
         include:
-          - platform: ubuntu-22.04
-            args: '--bundles appimage,deb'
-          - platform: macos-latest
-            args: '--bundles dmg,app'
-          - platform: windows-latest
-            args: '--bundles nsis'
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            artifact_name: ditto
+            release_names: ['ditto-linux-x86_64', 'ditto_linux_x64', 'ditto']
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact_name: ditto
+            release_names: ['ditto_darwin_aarch64', 'ditto-darwin-aarch64']
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_name: ditto.exe
+            release_names: ['ditto_windows_x64.exe', 'ditto_windows_x86_64.exe', 'ditto.exe']
 
-    runs-on: ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Install Bun
-        uses: oven-sh/setup-bun@v1
-        with:
-          bun-version: latest
-
-      - name: Install Rust
+      - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
-          workspaces: './src-tauri -> target'
+          key: ${{ matrix.target }}
 
-      - name: Install Linux dependencies
+      - name: Install Linux build dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+          sudo apt-get install -y \
+            libx11-dev \
+            libxkbcommon-x11-dev \
+            libxcb-render0-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev \
+            libasound2-dev \
+            libfontconfig1-dev \
+            libssl-dev \
+            libvulkan-dev \
+            wmctrl
 
-      - name: Install frontend dependencies
-        run: |
-          bun install
-          cd app && bun install
+      - name: Build release binary
+        run: cargo build --release -p ditto-gpui
 
-      - name: Build Tauri app
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tagName: ${{ github.ref_name }}
-          releaseName: 'Ditto v__VERSION__'
-          releaseBody: 'Precompiled builds of Ditto.'
-          releaseDraft: false
-          prerelease: false
-          uploadPlainBinary: true
-          args: ${{ matrix.args }}
-
-      - name: Upload standalone binary
+      - name: Prepare and upload assets to GitHub Release
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if [ "${{ runner.os }}" = "Linux" ]; then
-            [ -f "target/release/ditto" ] && gh release upload ${{ github.ref_name }} target/release/ditto#ditto-linux-x86_64 --clobber || true
-            [ -f "src-tauri/target/release/ditto" ] && gh release upload ${{ github.ref_name }} src-tauri/target/release/ditto#ditto-linux-x86_64 --clobber || true
-          elif [ "${{ runner.os }}" = "Windows" ]; then
-            [ -f "target/release/ditto.exe" ] && gh release upload ${{ github.ref_name }} target/release/ditto.exe#ditto_windows_x86_64.exe --clobber || true
-            [ -f "src-tauri/target/release/ditto.exe" ] && gh release upload ${{ github.ref_name }} src-tauri/target/release/ditto.exe#ditto_windows_x86_64.exe --clobber || true
-          elif [ "${{ runner.os }}" = "macOS" ]; then
-            [ -f "target/release/ditto" ] && gh release upload ${{ github.ref_name }} target/release/ditto#ditto-darwin-x86_64 --clobber || true
-            [ -f "src-tauri/target/release/ditto" ] && gh release upload ${{ github.ref_name }} src-tauri/target/release/ditto#ditto-darwin-x86_64 --clobber || true
+          TAG="${{ github.ref_name }}"
+          BIN_PATH="target/release/${{ matrix.artifact_name }}"
+
+          if [ ! -f "$BIN_PATH" ]; then
+            echo "Error: Binary not found at $BIN_PATH"
+            exit 1
           fi
+
+          # Ensure GitHub release exists
+          gh release view "$TAG" || gh release create "$TAG" --title "Ditto $TAG" --notes "Native GPUI release for Ditto clipboard manager." --draft=false --prerelease=false
+
+          # Upload under each expected asset name for install scripts
+          for name in ${{ join(matrix.release_names, ' ') }}; do
+            echo "Uploading $BIN_PATH as $name to release $TAG..."
+            cp "$BIN_PATH" "./$name"
+            gh release upload "$TAG" "./$name" --clobber
+            rm -f "./$name"
+          done
