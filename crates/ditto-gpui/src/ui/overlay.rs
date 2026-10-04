@@ -35,7 +35,7 @@ pub struct DittoOverlayView {
     pub theme_colors: ThemeColors,
     pub shown_at: Instant,
     pub snapshot_time: chrono::DateTime<chrono::Utc>,
-    pub cached_preview_image: Option<(i64, Arc<Image>)>,
+    pub cached_images: Vec<(i64, Arc<Image>)>,
     pub last_nav_time: Instant,
     _subscriptions: Vec<Subscription>,
 }
@@ -177,7 +177,7 @@ impl DittoOverlayView {
             theme_colors,
             shown_at,
             snapshot_time,
-            cached_preview_image: None,
+            cached_images: Vec::with_capacity(16),
             last_nav_time: Instant::now(),
             _subscriptions: vec![sub_input, sub_activation, sub_opacity, sub_limit],
         }
@@ -320,7 +320,7 @@ impl DittoOverlayView {
             "down" | "arrowdown" => {
                 if !self.in_settings {
                     let now = Instant::now();
-                    if now.duration_since(self.last_nav_time) >= Duration::from_millis(35) {
+                    if now.duration_since(self.last_nav_time) >= Duration::from_millis(50) {
                         self.last_nav_time = now;
                         self.select_next(cx);
                     }
@@ -329,7 +329,7 @@ impl DittoOverlayView {
             "up" | "arrowup" => {
                 if !self.in_settings {
                     let now = Instant::now();
-                    if now.duration_since(self.last_nav_time) >= Duration::from_millis(35) {
+                    if now.duration_since(self.last_nav_time) >= Duration::from_millis(50) {
                         self.last_nav_time = now;
                         self.select_prev(cx);
                     }
@@ -747,16 +747,11 @@ impl DittoOverlayView {
         let content_view = if let Some(item) = &active_item {
             let is_image = item.content.starts_with("data:image/png;base64,");
             if is_image {
-                let maybe_image = if let Some((cached_id, cached_img)) = &self.cached_preview_image
-                {
-                    if *cached_id == item.id {
-                        Some(cached_img.clone())
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
+                let maybe_image = self
+                    .cached_images
+                    .iter()
+                    .find(|(cached_id, _)| *cached_id == item.id)
+                    .map(|(_, img)| img.clone());
 
                 let image_data = match maybe_image {
                     Some(img) => Some(img),
@@ -768,7 +763,10 @@ impl DittoOverlayView {
                                 format: ImageFormat::Png,
                                 bytes,
                             });
-                            self.cached_preview_image = Some((item.id, img_arc.clone()));
+                            if self.cached_images.len() >= 16 {
+                                self.cached_images.remove(0);
+                            }
+                            self.cached_images.push((item.id, img_arc.clone()));
                             Some(img_arc)
                         } else {
                             None
@@ -825,9 +823,9 @@ impl DittoOverlayView {
                             .font_family("monospace")
                             .text_sm()
                             .text_color(theme.text_primary)
-                            .child(if item.content.len() > 30_000 {
+                            .child(if item.content.len() > 10_000 {
                                 let mut truncated =
-                                    item.content.chars().take(30_000).collect::<String>();
+                                    item.content.chars().take(10_000).collect::<String>();
                                 truncated.push_str("\n\n... [Content truncated for preview]");
                                 truncated
                             } else {
