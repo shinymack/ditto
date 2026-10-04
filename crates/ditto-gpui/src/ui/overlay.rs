@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use super::icons::{ICON_CLOSE, ICON_IMAGE, ICON_SEARCH, ICON_SETTINGS, LOGO_PNG};
 use super::theme::ThemeColors;
-use crate::search::{format_size, get_relative_time, get_simple_hash};
+use crate::search::{format_size, get_relative_time_at, get_simple_hash};
 use crate::state::AppState;
 
 pub struct DittoOverlayView {
@@ -26,6 +26,8 @@ pub struct DittoOverlayView {
     pub in_settings: bool,
     pub theme_colors: ThemeColors,
     pub shown_at: Instant,
+    pub snapshot_time: chrono::DateTime<chrono::Utc>,
+    pub cached_preview_image: Option<(i64, Arc<Image>)>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -133,11 +135,14 @@ impl DittoOverlayView {
             in_settings: false,
             theme_colors,
             shown_at,
+            snapshot_time: chrono::Utc::now(),
+            cached_preview_image: None,
             _subscriptions: vec![sub_input, sub_activation, sub_opacity, sub_limit],
         }
     }
 
     pub fn update_filter(&mut self) {
+        self.snapshot_time = chrono::Utc::now();
         let max_items = self.state.config.read().max_items;
         self.filtered_items = self.state.search(&self.query, max_items);
         if self.selected_index >= self.filtered_items.len() {
@@ -543,7 +548,7 @@ impl DittoOverlayView {
         for (idx, item) in self.filtered_items.iter().enumerate() {
             let is_selected = idx == selected_idx;
             let is_img = item.content.starts_with("data:image/png;base64,");
-            let relative_time = get_relative_time(&item.created_at);
+            let relative_time = get_relative_time_at(&item.created_at, self.snapshot_time);
 
             let preview_text = if is_img {
                 "Image Clip".to_string()
@@ -701,14 +706,36 @@ impl DittoOverlayView {
         let content_view = if let Some(item) = &active_item {
             let is_image = item.content.starts_with("data:image/png;base64,");
             if is_image {
-                let b64 = item.content.trim_start_matches("data:image/png;base64,");
-                if let Ok(bytes) = BASE64_STANDARD.decode(b64) {
-                    let image_data = Arc::new(Image {
-                        id: item.id as u64,
-                        format: ImageFormat::Png,
-                        bytes,
-                    });
+                let maybe_image = if let Some((cached_id, cached_img)) = &self.cached_preview_image
+                {
+                    if *cached_id == item.id {
+                        Some(cached_img.clone())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
 
+                let image_data = match maybe_image {
+                    Some(img) => Some(img),
+                    None => {
+                        let b64 = item.content.trim_start_matches("data:image/png;base64,");
+                        if let Ok(bytes) = BASE64_STANDARD.decode(b64) {
+                            let img_arc = Arc::new(Image {
+                                id: item.id as u64,
+                                format: ImageFormat::Png,
+                                bytes,
+                            });
+                            self.cached_preview_image = Some((item.id, img_arc.clone()));
+                            Some(img_arc)
+                        } else {
+                            None
+                        }
+                    }
+                };
+
+                if let Some(image_data) = image_data {
                     div()
                         .flex_1()
                         .p(px(20.0))

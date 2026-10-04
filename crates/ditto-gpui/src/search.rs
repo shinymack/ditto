@@ -14,6 +14,12 @@ pub fn get_simple_hash(s: &str) -> String {
 
 /// Formats UTC SQLite timestamp ("YYYY-MM-DD HH:MM:SS.FFF") to relative human time.
 pub fn get_relative_time(timestamp_str: &str) -> String {
+    get_relative_time_at(timestamp_str, Utc::now())
+}
+
+/// Formats UTC SQLite timestamp ("YYYY-MM-DD HH:MM:SS.FFF") to relative human time evaluated at a reference instant.
+/// For items under 1 minute, returns "Just now" to avoid second-by-second layout invalidation.
+pub fn get_relative_time_at(timestamp_str: &str, reference_now: DateTime<Utc>) -> String {
     let parse_str = if timestamp_str.contains('T') {
         timestamp_str.to_string()
     } else {
@@ -23,7 +29,6 @@ pub fn get_relative_time(timestamp_str: &str) -> String {
     let dt = match DateTime::parse_from_rfc3339(&parse_str) {
         Ok(parsed) => parsed.with_timezone(&Utc),
         Err(_) => {
-            // Try parsing SQLite format: "%Y-%m-%d %H:%M:%S%.f"
             match chrono::NaiveDateTime::parse_from_str(timestamp_str, "%Y-%m-%d %H:%M:%S%.f") {
                 Ok(naive) => DateTime::<Utc>::from_naive_utc_and_offset(naive, Utc),
                 Err(_) => {
@@ -37,17 +42,14 @@ pub fn get_relative_time(timestamp_str: &str) -> String {
         }
     };
 
-    let now = Utc::now();
-    let diff = now.signed_duration_since(dt);
+    let diff = reference_now.signed_duration_since(dt);
     if diff.num_milliseconds() < 0 {
         return "Just now".to_string();
     }
 
     let diff_sec = diff.num_seconds();
-    if diff_sec < 10 {
+    if diff_sec < 60 {
         "Just now".to_string()
-    } else if diff_sec < 60 {
-        format!("{}s ago", diff_sec)
     } else {
         let diff_min = diff_sec / 60;
         if diff_min < 60 {
