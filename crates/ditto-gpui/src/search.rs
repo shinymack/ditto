@@ -2,12 +2,28 @@ use chrono::{DateTime, Utc};
 use ditto_core::db::ClipboardItem;
 
 pub fn get_simple_hash(s: &str) -> String {
+    let bytes = s.as_bytes();
     let mut hash: i32 = 0;
-    for b in s.encode_utf16() {
-        hash = hash
-            .wrapping_shl(5)
-            .wrapping_sub(hash)
-            .wrapping_add(b as i32);
+    if bytes.len() > 4096 {
+        for &b in &bytes[..2048] {
+            hash = hash
+                .wrapping_shl(5)
+                .wrapping_sub(hash)
+                .wrapping_add(b as i32);
+        }
+        for &b in &bytes[bytes.len() - 2048..] {
+            hash = hash
+                .wrapping_shl(5)
+                .wrapping_sub(hash)
+                .wrapping_add(b as i32);
+        }
+    } else {
+        for &b in bytes {
+            hash = hash
+                .wrapping_shl(5)
+                .wrapping_sub(hash)
+                .wrapping_add(b as i32);
+        }
     }
     format!("{:08x}", hash.unsigned_abs())
 }

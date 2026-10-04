@@ -11,12 +11,20 @@ use super::icons::{ICON_CLOSE, ICON_IMAGE, ICON_SEARCH, ICON_SETTINGS, LOGO_PNG}
 use super::theme::ThemeColors;
 use crate::search::{format_size, get_relative_time_at, get_simple_hash};
 use crate::state::AppState;
+#[derive(Clone)]
+pub struct CardItemView {
+    pub id: i64,
+    pub is_image: bool,
+    pub preview_text: String,
+    pub relative_time: String,
+}
 
 pub struct DittoOverlayView {
     pub state: AppState,
     pub query: String,
     pub selected_index: usize,
     pub filtered_items: Vec<ClipboardItem>,
+    pub card_views: Vec<CardItemView>,
     pub search_input: Entity<InputState>,
     pub opacity_slider: Entity<SliderState>,
     pub history_limit_input: Entity<InputState>,
@@ -28,7 +36,36 @@ pub struct DittoOverlayView {
     pub shown_at: Instant,
     pub snapshot_time: chrono::DateTime<chrono::Utc>,
     pub cached_preview_image: Option<(i64, Arc<Image>)>,
+    pub last_nav_time: Instant,
     _subscriptions: Vec<Subscription>,
+}
+fn build_card_views(
+    items: &[ClipboardItem],
+    snapshot_time: chrono::DateTime<chrono::Utc>,
+) -> Vec<CardItemView> {
+    items
+        .iter()
+        .map(|item| {
+            let is_img = item.content.starts_with("data:image/png;base64,");
+            let preview_text = if is_img {
+                "Image Clip".to_string()
+            } else {
+                let first_line = item.content.lines().next().unwrap_or(&item.content);
+                if first_line.chars().count() > 32 {
+                    format!("{}...", first_line.chars().take(32).collect::<String>())
+                } else {
+                    first_line.to_string()
+                }
+            };
+            let relative_time = get_relative_time_at(&item.created_at, snapshot_time);
+            CardItemView {
+                id: item.id,
+                is_image: is_img,
+                preview_text,
+                relative_time,
+            }
+        })
+        .collect()
 }
 
 impl DittoOverlayView {
@@ -121,11 +158,15 @@ impl DittoOverlayView {
             }
         });
 
+        let snapshot_time = chrono::Utc::now();
+        let card_views = build_card_views(&initial_items, snapshot_time);
+
         Self {
             state,
             query: String::new(),
             selected_index: 0,
             filtered_items: initial_items,
+            card_views,
             search_input,
             opacity_slider,
             history_limit_input,
@@ -135,8 +176,9 @@ impl DittoOverlayView {
             in_settings: false,
             theme_colors,
             shown_at,
-            snapshot_time: chrono::Utc::now(),
+            snapshot_time,
             cached_preview_image: None,
+            last_nav_time: Instant::now(),
             _subscriptions: vec![sub_input, sub_activation, sub_opacity, sub_limit],
         }
     }
@@ -148,6 +190,7 @@ impl DittoOverlayView {
         if self.selected_index >= self.filtered_items.len() {
             self.selected_index = self.filtered_items.len().saturating_sub(1);
         }
+        self.card_views = build_card_views(&self.filtered_items, self.snapshot_time);
     }
 
     pub fn select_next(&mut self, cx: &mut Context<Self>) {
@@ -276,12 +319,20 @@ impl DittoOverlayView {
             }
             "down" | "arrowdown" => {
                 if !self.in_settings {
-                    self.select_next(cx);
+                    let now = Instant::now();
+                    if now.duration_since(self.last_nav_time) >= Duration::from_millis(35) {
+                        self.last_nav_time = now;
+                        self.select_next(cx);
+                    }
                 }
             }
             "up" | "arrowup" => {
                 if !self.in_settings {
-                    self.select_prev(cx);
+                    let now = Instant::now();
+                    if now.duration_since(self.last_nav_time) >= Duration::from_millis(35) {
+                        self.last_nav_time = now;
+                        self.select_prev(cx);
+                    }
                 }
             }
             "enter" => {
@@ -545,24 +596,14 @@ impl DittoOverlayView {
             .py(px(12.0))
             .gap(px(8.0));
 
-        for (idx, item) in self.filtered_items.iter().enumerate() {
+        for (idx, item) in self.card_views.iter().enumerate() {
             let is_selected = idx == selected_idx;
-            let is_img = item.content.starts_with("data:image/png;base64,");
-            let relative_time = get_relative_time_at(&item.created_at, self.snapshot_time);
-
-            let preview_text = if is_img {
-                "Image Clip".to_string()
-            } else {
-                let first_line = item.content.lines().next().unwrap_or(&item.content);
-                if first_line.chars().count() > 32 {
-                    format!("{}...", first_line.chars().take(32).collect::<String>())
-                } else {
-                    first_line.to_string()
-                }
-            };
+            let is_img = item.is_image;
+            let relative_time = item.relative_time.clone();
+            let preview_text = item.preview_text.clone();
 
             let card = h_flex()
-                .id(format!("card-item-{}", item.id))
+                .id(idx)
                 .p(px(10.0))
                 .rounded(px(8.0))
                 .justify_between()
@@ -784,7 +825,14 @@ impl DittoOverlayView {
                             .font_family("monospace")
                             .text_sm()
                             .text_color(theme.text_primary)
-                            .child(item.content.clone()),
+                            .child(if item.content.len() > 30_000 {
+                                let mut truncated =
+                                    item.content.chars().take(30_000).collect::<String>();
+                                truncated.push_str("\n\n... [Content truncated for preview]");
+                                truncated
+                            } else {
+                                item.content.clone()
+                            }),
                     )
                     .into_any_element()
             }
