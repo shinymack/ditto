@@ -8,7 +8,7 @@ name = "ditto"
 path = "src/main.rs"
 
 [dependencies]
-gpui-kit = "0.6"
+gpui-kit = "0.7"
 ditto-core = { path = "../ditto-core" }
 parking_lot = "0.12"
 chrono = "0.4"

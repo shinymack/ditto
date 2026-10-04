@@ -444,8 +444,8 @@ fn main() {
                 );
             }
             if let Ok(db) = Db::init(db_path.to_str().unwrap()) {
-                if let Ok(items) = db.get_history(10000, None) {
-                    println!("  Total Items:   {}", items.len());
+                if let Ok(count) = db.count_items() {
+                    println!("  Total Items:   {}", count);
                 }
             }
             println!("  Config Path:   {}", Config::file_path().display());

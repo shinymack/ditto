@@ -1,6 +1,7 @@
+use parking_lot::Mutex;
 use rusqlite::{params, Connection, Result};
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClipboardItem {
@@ -18,6 +19,9 @@ impl Db {
     pub fn init(path: &str) -> Result<Self> {
         let conn = Connection::open(path)?;
 
+        // Enable Write-Ahead Logging (WAL) and normal synchronous for fast, non-blocking disk I/O
+        let _ = conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;");
+
         let version: i32 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
         if version < 1 {
             conn.execute(
@@ -28,7 +32,16 @@ impl Db {
                 )",
                 [],
             )?;
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_history_created_at ON history(created_at DESC)",
+                [],
+            )?;
             conn.execute("PRAGMA user_version = 1", [])?;
+        } else {
+            let _ = conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_history_created_at ON history(created_at DESC)",
+                [],
+            );
         }
 
         Ok(Self {
@@ -37,7 +50,7 @@ impl Db {
     }
 
     pub fn insert_or_update(&self, content: &str, max_items: usize) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute(
             "INSERT INTO history (content, created_at)
              VALUES (?1, strftime('%Y-%m-%d %H:%M:%f', 'now'))
@@ -57,7 +70,7 @@ impl Db {
     }
 
     pub fn get_history(&self, limit: usize, query: Option<&str>) -> Result<Vec<ClipboardItem>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let mut items = Vec::new();
         if let Some(q) = query {
             if !q.trim().is_empty() {
@@ -96,15 +109,20 @@ impl Db {
     }
 
     pub fn clear_history(&self) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute("DELETE FROM history", [])?;
         Ok(())
     }
 
     pub fn delete_item(&self, id: i64) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute("DELETE FROM history WHERE id = ?1", params![id])?;
         Ok(())
+    }
+
+    pub fn count_items(&self) -> Result<i64> {
+        let conn = self.conn.lock();
+        conn.query_row("SELECT COUNT(*) FROM history", [], |row| row.get(0))
     }
 }
 

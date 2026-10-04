@@ -1,30 +1,17 @@
+# Rust build artifacts
+/target
+node_modules/
+
 # Logs
 logs
 *.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
-*.local
-
-# Editor directories and files
+# Editor and OS files
 .vscode/
 .idea
 .DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
 *.sw?
-
-# Rust target
-/target
+*.local
 
 # Local project docs
 /.docs
-

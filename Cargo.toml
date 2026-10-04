@@ -9,5 +9,5 @@ members = [
 panic = "abort"
 codegen-units = 16
 lto = "thin"
-opt-level = "z"
+opt-level = 3
 strip = true

@@ -3,14 +3,16 @@ use clipboard_rs::common::RustImage;
 use clipboard_rs::{
     Clipboard, ClipboardContext, ClipboardHandler, ClipboardWatcher, ClipboardWatcherContext,
 };
+use parking_lot::Mutex;
 use std::sync::mpsc::Sender;
+use std::sync::Arc;
 use std::thread;
 
 struct ClipboardReceiver {
     ctx: ClipboardContext,
     sender: Sender<String>,
     limit: usize,
-    last_clip: std::sync::Arc<std::sync::Mutex<String>>,
+    last_clip: Arc<Mutex<String>>,
 }
 
 impl ClipboardHandler for ClipboardReceiver {
@@ -20,7 +22,7 @@ impl ClipboardHandler for ClipboardReceiver {
             let trimmed = text.trim();
             if !trimmed.is_empty() {
                 if trimmed.len() <= self.limit {
-                    let mut last = self.last_clip.lock().unwrap();
+                    let mut last = self.last_clip.lock();
                     if *last != trimmed {
                         *last = trimmed.to_string();
                         let _ = self.sender.send(trimmed.to_string());
@@ -35,7 +37,7 @@ impl ClipboardHandler for ClipboardReceiver {
                 if let Ok(png_data) = img.to_png() {
                     let bytes = png_data.get_bytes();
                     let b64 = format!("data:image/png;base64,{}", BASE64_STANDARD.encode(bytes));
-                    let mut last = self.last_clip.lock().unwrap();
+                    let mut last = self.last_clip.lock();
                     if *last != b64 {
                         *last = b64.clone();
                         let _ = self.sender.send(b64);
@@ -57,7 +59,7 @@ pub fn start_monitor(sender: Sender<String>, max_size: Option<usize>) -> thread:
             ctx,
             sender,
             limit,
-            last_clip: std::sync::Arc::new(std::sync::Mutex::new(String::new())),
+            last_clip: Arc::new(Mutex::new(String::new())),
         };
         let mut watcher = match ClipboardWatcherContext::new() {
             Ok(w) => w,
