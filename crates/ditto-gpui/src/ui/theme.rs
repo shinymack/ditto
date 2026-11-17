@@ -41,6 +41,21 @@ pub fn parse_hex_color(hex: &str, alpha: f32) -> Rgba {
 }
 
 impl ThemeColors {
+    /// Neutral overlays stay legible on both light and dark surfaces.
+    pub fn tint(&self, alpha: f32) -> Rgba {
+        Rgba {
+            a: alpha,
+            ..self.text_primary
+        }
+    }
+
+    pub fn selection(&self) -> Rgba {
+        Rgba {
+            a: 0.12,
+            ..self.accent_primary
+        }
+    }
+
     pub fn from_config(config: &Config) -> Self {
         let opacity_val = (config.opacity.clamp(20, 100) as f32) / 100.0;
 
@@ -83,7 +98,7 @@ impl ThemeColors {
             },
             "light-pure" => Self {
                 bg_base: parse_hex_color("#f9fafb", 1.0),
-                bg_surface: parse_hex_color("#ffffff", 0.85),
+                bg_surface: parse_hex_color("#ffffff", opacity_val),
                 border_card: rgba(0x00000014),
                 text_primary: parse_hex_color("#111827", 1.0),
                 text_secondary: parse_hex_color("#4b5563", 1.0),
@@ -92,7 +107,7 @@ impl ThemeColors {
             },
             "light-nordic" => Self {
                 bg_base: parse_hex_color("#f3f4f6", 1.0),
-                bg_surface: parse_hex_color("#f3f4f6", 0.85),
+                bg_surface: parse_hex_color("#f3f4f6", opacity_val),
                 border_card: rgba(0x0000000f),
                 text_primary: parse_hex_color("#1f2937", 1.0),
                 text_secondary: parse_hex_color("#4b5563", 1.0),

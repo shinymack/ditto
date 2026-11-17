@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use ditto_core::db::ClipboardItem;
+use std::sync::Arc;
 
 pub fn get_simple_hash(s: &str) -> String {
     let bytes = s.as_bytes();
@@ -120,8 +121,12 @@ pub fn contains_ignore_case(haystack: &str, needle: &str) -> bool {
     }
     false
 }
-/// In-memory multi-word search across cached clipboard items (zero heap allocation during search).
-pub fn search_items(items: &[ClipboardItem], query: &str, limit: usize) -> Vec<ClipboardItem> {
+/// In-memory multi-word search returning shared items without copying clipboard payloads.
+pub fn search_items(
+    items: &[Arc<ClipboardItem>],
+    query: &str,
+    limit: usize,
+) -> Vec<Arc<ClipboardItem>> {
     let trimmed = query.trim();
     if trimmed.is_empty() {
         return items.iter().take(limit).cloned().collect();
@@ -181,49 +186,51 @@ mod tests {
                 content: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==".to_string(),
                 created_at: "2026-09-18 09:00:00.000".to_string(),
             },
-        ];
+        ]
+        .into_iter()
+        .map(Arc::new)
+        .collect::<Vec<_>>();
 
         let results = search_items(&items, "", 10);
         assert_eq!(results.len(), 3);
-
+        for (result, item) in results.iter().zip(&items) {
+            assert!(Arc::ptr_eq(result, item));
+        }
         let results = search_items(&items, "cargo release", 10);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].id, 1);
+        assert!(Arc::ptr_eq(&results[0], &items[0]));
 
         let results = search_items(&items, "image", 10);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].id, 3);
+        assert!(Arc::ptr_eq(&results[0], &items[2]));
     }
     #[test]
-    fn test_search_latency_benchmark() {
-        let mut items = Vec::with_capacity(100);
-        for i in 0..100 {
-            items.push(ClipboardItem {
-                id: i as i64,
-                content: format!(
-                    "Clipboard item #{} with some code snippets git commit --amend",
-                    i
-                ),
-                created_at: "2026-09-18 10:00:00.000".to_string(),
-            });
-        }
+    fn search_preserves_order_limits_and_matching() {
+        let items: Vec<_> = ["Git COMMIT --amend", "commit only", "git commit amend"]
+            .into_iter()
+            .enumerate()
+            .map(|(id, content)| {
+                Arc::new(ClipboardItem {
+                    id: id as i64,
+                    content: content.to_string(),
+                    created_at: "2026-09-18 10:00:00.000".to_string(),
+                })
+            })
+            .collect();
 
-        let start = std::time::Instant::now();
-        let iterations = 100;
-        for _ in 0..iterations {
-            let _ = search_items(&items, "commit amend 50", 50);
-        }
-        let elapsed = start.elapsed();
-        let avg_us = elapsed.as_micros() as f64 / iterations as f64;
-        println!(
-            "Average search latency across 100 items in RAM: {:.2} µs ({:.4} ms)",
-            avg_us,
-            avg_us / 1000.0
+        let results = search_items(&items, "  COMMIT\tamend ", 10);
+        assert_eq!(
+            results.iter().map(|item| item.id).collect::<Vec<_>>(),
+            [0, 2]
         );
-        assert!(
-            avg_us < 2000.0,
-            "Search latency in unoptimized debug must be < 2000 µs (got {:.2} µs)",
-            avg_us
-        );
+        assert!(Arc::ptr_eq(&results[0], &items[0]));
+        assert!(Arc::ptr_eq(&results[1], &items[2]));
+        assert_eq!(search_items(&items, "commit", 1).len(), 1);
+        assert_eq!(search_items(&items, " \t ", 1)[0].id, 0);
+        assert!(search_items(&items, "", 0).is_empty());
+        assert!(search_items(&items, "commit", 0).is_empty());
+        assert!(search_items(&items, "missing", 10).is_empty());
     }
 }

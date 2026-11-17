@@ -6,7 +6,7 @@ pub fn setup_autostart() {
         return;
     };
 
-    let desktop_entry = format!(
+    let autostart_entry = format!(
         "[Desktop Entry]\n\
          Type=Application\n\
          Name=Ditto\n\
@@ -20,13 +20,26 @@ pub fn setup_autostart() {
         exe.display()
     );
 
+    let app_entry = format!(
+        "[Desktop Entry]\n\
+         Type=Application\n\
+         Name=Ditto\n\
+         Comment=Lightweight clipboard manager\n\
+         Exec={} toggle\n\
+         Icon=ditto\n\
+         Terminal=false\n\
+         Categories=Utility;\n\
+         StartupNotify=false\n",
+        exe.display()
+    );
+
     if let Some(dir) = dirs::config_dir().map(|d| d.join("autostart")) {
         let _ = std::fs::create_dir_all(&dir);
-        let _ = std::fs::write(dir.join("ditto.desktop"), &desktop_entry);
+        let _ = std::fs::write(dir.join("ditto.desktop"), &autostart_entry);
     }
     if let Some(dir) = dirs::data_dir().map(|d| d.join("applications")) {
         let _ = std::fs::create_dir_all(&dir);
-        let _ = std::fs::write(dir.join("ditto.desktop"), &desktop_entry);
+        let _ = std::fs::write(dir.join("ditto.desktop"), &app_entry);
     }
     if let Some(dir) = dirs::data_dir().map(|d| d.join("icons/hicolor/256x256/apps")) {
         let _ = std::fs::create_dir_all(&dir);

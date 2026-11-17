@@ -1,3 +1,4 @@
+pub mod fonts;
 pub mod ipc;
 pub mod platform;
 pub mod search;
@@ -65,19 +66,14 @@ fn open_overlay_window(
     let width = px(800.0);
     let height = px(500.0);
 
-    let window_bounds = {
+    let (saved_x, saved_y) = {
         let cfg = state.config.read();
-        if let (Some(x), Some(y)) = (cfg.window_x, cfg.window_y) {
-            if x > 10.0 && y > 10.0 {
-                WindowBounds::Windowed(Bounds::new(point(px(x), px(y)), size(width, height)))
-            } else if let Some(display) = cx.primary_display() {
-                let db = display.bounds();
-                let x = db.origin.x + (db.size.width - width) / 2.0;
-                let y = db.origin.y + (db.size.height - height) / 3.0;
-                WindowBounds::Windowed(Bounds::new(point(x, y), size(width, height)))
-            } else {
-                WindowBounds::Windowed(Bounds::centered(None, size(width, height), cx))
-            }
+        (cfg.window_x, cfg.window_y)
+    };
+
+    let window_bounds = if let (Some(x), Some(y)) = (saved_x, saved_y) {
+        if x > 10.0 && y > 10.0 {
+            WindowBounds::Windowed(Bounds::new(point(px(x), px(y)), size(width, height)))
         } else if let Some(display) = cx.primary_display() {
             let db = display.bounds();
             let x = db.origin.x + (db.size.width - width) / 2.0;
@@ -86,6 +82,13 @@ fn open_overlay_window(
         } else {
             WindowBounds::Windowed(Bounds::centered(None, size(width, height), cx))
         }
+    } else if let Some(display) = cx.primary_display() {
+        let db = display.bounds();
+        let x = db.origin.x + (db.size.width - width) / 2.0;
+        let y = db.origin.y + (db.size.height - height) / 3.0;
+        WindowBounds::Windowed(Bounds::new(point(x, y), size(width, height)))
+    } else {
+        WindowBounds::Windowed(Bounds::centered(None, size(width, height), cx))
     };
 
     let options = WindowOptions {
@@ -105,10 +108,6 @@ fn open_overlay_window(
         app_id: Some("ditto".into()),
         ..Default::default()
     };
-    let (saved_x, saved_y) = {
-        let cfg = state.config.read();
-        (cfg.window_x, cfg.window_y)
-    };
     let state_clone = state.clone();
     let slot_clone = window_slot.clone();
 
@@ -123,6 +122,7 @@ fn open_overlay_window(
                 window.refresh();
                 cx.notify();
             });
+
             std::thread::spawn(move || {
                 platform::init_window_hints(saved_x, saved_y);
                 platform::focus_by_pid();
@@ -203,7 +203,9 @@ fn run_daemon() {
         gpui_kit::init(cx);
         gpui_kit::component::Theme::change(gpui_kit::component::ThemeMode::Dark, None, cx);
         gpui_kit::component::Theme::set_scrollbar_mode(gpui_kit::base::ScrollbarMode::Always, cx);
+        fonts::init(cx);
         cx.set_quit_mode(gpui_kit::gpui::QuitMode::Explicit);
+
         // Track window close globally (non-Linux only — on Linux we unmap instead)
         let slot_for_closed = slot_clone.clone();
         let is_vis_for_closed = is_vis_clone.clone();
@@ -268,10 +270,27 @@ fn run_daemon() {
                                 platform::focus_by_pid();
                             });
                         } else {
-                            // No window handle at all — create fresh window
                             drop(lock);
-                            open_overlay_window(cx, state, slot.clone());
+                            open_overlay_window(cx, state.clone(), slot.clone());
+                            let cfg = state.config.read();
+                            let x = cfg.window_x.unwrap_or(400.0) as i32;
+                            let y = cfg.window_y.unwrap_or(200.0) as i32;
+                            drop(cfg);
+
+                            #[cfg(target_os = "linux")]
+                            platform::show_window(x, y);
+
+                            let lock = slot.lock();
+                            if let Some(h) = lock.as_ref() {
+                                let _ = h.update(cx, |view, window, cx| {
+                                    view.on_show(window, cx);
+                                    window.activate_window();
+                                    window.refresh();
+                                    cx.notify();
+                                });
+                            }
                             is_vis.store(true, Ordering::SeqCst);
+                            platform::focus_by_pid();
                         }
                     }
                     "clear" => {

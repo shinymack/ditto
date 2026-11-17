@@ -21,6 +21,13 @@ To keep Ditto extremely fast and light on resources, the project adheres to the 
 * **Background Daemon**: Hides completely from macOS Dock and Cmd+Tab switcher, operating purely as a background utility.
 * **Database (SQLite)**: AES-256-GCM / Argon2id storage. Duplicate entries automatically float to top of history.
 
+## Native interface
+
+- **Bundled typography:** Noto Sans for the interface and JetBrains Mono for clipboard previews, metadata, and key hints. Both fonts are embedded in the executable; no font installation or runtime download is needed. Their SIL Open Font License notices ship in `crates/ditto-gpui/assets/fonts/`.
+- **Keyboard workflow:** type to search, use ↑/↓ to select, and press Enter to copy the selected entry and hide Ditto. Clicking an entry or pressing Alt+1…9 (Option+1…9 on macOS) also copies and hides. Clipboard write failures keep the window open with an error message. Settings owns keyboard focus while open; Escape or Back restores focus to search.
+- **Appearance:** fixed-width history pane, accent-tinted selection, and theme-aware preview/metadata surfaces. Empty history and unmatched searches show different guidance.
+- **Rendering:** history rows are virtualized, so only visible rows are built. Search stays in memory and shares clipboard payloads instead of copying them on each query. Preview text and checksums are cached; previews display up to 10,000 characters while copying preserves the full entry. Cache entries retain SQLite's actual IDs so reordering and deleting entries remain consistent.
+
 ## Installation
 
 ### Linux & macOS (Terminal)

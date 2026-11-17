@@ -30,22 +30,28 @@ pub fn get_ditto_x11_window_id() -> Option<u32> {
         return None;
     }
 
-    if let Ok(tree_reply) = conn.query_tree(root) {
-        if let Ok(tree) = tree_reply.reply() {
-            for win in tree.children {
-                if let Ok(pid_reply) = conn.get_property(
-                    false,
-                    win,
-                    net_wm_pid,
-                    x11rb::protocol::xproto::AtomEnum::CARDINAL,
-                    0,
-                    1,
-                ) {
-                    if let Ok(pid_prop) = pid_reply.reply() {
-                        if let Some(mut pids) = pid_prop.value32() {
-                            if pids.next() == Some(my_pid) {
-                                CACHED_X11_WIN_ID.store(win, Ordering::SeqCst);
-                                return Some(win);
+    for attempt in 0..15 {
+        if attempt > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+
+        if let Ok(tree_reply) = conn.query_tree(root) {
+            if let Ok(tree) = tree_reply.reply() {
+                for win in tree.children {
+                    if let Ok(pid_reply) = conn.get_property(
+                        false,
+                        win,
+                        net_wm_pid,
+                        x11rb::protocol::xproto::AtomEnum::CARDINAL,
+                        0,
+                        1,
+                    ) {
+                        if let Ok(pid_prop) = pid_reply.reply() {
+                            if let Some(mut pids) = pid_prop.value32() {
+                                if pids.next() == Some(my_pid) {
+                                    CACHED_X11_WIN_ID.store(win, Ordering::SeqCst);
+                                    return Some(win);
+                                }
                             }
                         }
                     }
@@ -96,16 +102,21 @@ pub fn apply_window_hints(
     let wm_normal_hints = intern("WM_NORMAL_HINTS");
     let wm_size_hints = intern("WM_SIZE_HINTS");
 
-    // Explicitly set WM_NORMAL_HINTS with USPosition (1) | PPosition (4) so WMs (Mutter/KWin)
-    // honor the exact saved position rather than centering the window!
+    // Explicitly set WM_NORMAL_HINTS with USPosition | PPosition | StaticGravity
+    // so WMs (Mutter/Muffin) honor the exact coordinates with zero frame cascading!
     if let Some((x, y)) = pos {
         if wm_normal_hints != 0 && wm_size_hints != 0 {
             let mut size_hints = [0u32; 18];
-            size_hints[0] = 5; // USPosition (1) | PPosition (4)
+            size_hints[0] = 1 | 2 | 4 | 8 | 16 | 32 | (1 << 9);
             size_hints[1] = x as u32;
             size_hints[2] = y as u32;
             size_hints[3] = 800;
             size_hints[4] = 500;
+            size_hints[5] = 800;
+            size_hints[6] = 500;
+            size_hints[7] = 800;
+            size_hints[8] = 500;
+            size_hints[17] = 10; // StaticGravity
             let _ = conn.change_property32(
                 x11rb::protocol::xproto::PropMode::REPLACE,
                 win_id,
@@ -192,16 +203,151 @@ pub fn unmap_and_get_coords() -> Option<(i32, i32)> {
 
     let coords = conn
         .translate_coordinates(win_id, root, 0, 0)
-        .ok()?
-        .reply()
-        .ok()?;
-    let x = coords.dst_x as i32;
-    let y = coords.dst_y as i32;
+        .ok()
+        .and_then(|c| c.reply().ok())
+        .map(|c| (c.dst_x as i32, c.dst_y as i32));
 
-    conn.unmap_window(win_id).ok();
-    conn.flush().ok();
+    let _ = conn.unmap_window(win_id);
+    let _ = conn.flush();
 
-    Some((x, y))
+    coords
+}
+
+/// Maps, positions, and activates the window in a single atomic X11 batch.
+/// Setting WM_NORMAL_HINTS and ConfigureWindow before MapWindow guarantees
+/// the window manager places the window directly at (x, y) with zero visual jump.
+pub fn native_x11_show(win_id: u32, x: i32, y: i32, width: u32, height: u32) -> bool {
+    let Ok((conn, screen_num)) = x11rb::connect(None) else {
+        return false;
+    };
+    let root = conn.setup().roots[screen_num].root;
+
+    let intern = |name: &str| -> u32 {
+        conn.intern_atom(false, name.as_bytes())
+            .ok()
+            .and_then(|c| c.reply().ok())
+            .map(|r| r.atom)
+            .unwrap_or(0)
+    };
+
+    let net_current_desktop = intern("_NET_CURRENT_DESKTOP");
+    let net_wm_desktop = intern("_NET_WM_DESKTOP");
+    let net_active_window = intern("_NET_ACTIVE_WINDOW");
+    let net_moveresize = intern("_NET_MOVERESIZE_WINDOW");
+    let wm_normal_hints = intern("WM_NORMAL_HINTS");
+    let wm_size_hints = intern("WM_SIZE_HINTS");
+
+    // 1. Set WM_NORMAL_HINTS with USPosition | PPosition | USSize | PSize | StaticGravity
+    if wm_normal_hints != 0 && wm_size_hints != 0 {
+        let mut size_hints = [0u32; 18];
+        size_hints[0] = 1 | 2 | 4 | 8 | 16 | 32 | (1 << 9);
+        size_hints[1] = x as u32;
+        size_hints[2] = y as u32;
+        size_hints[3] = width;
+        size_hints[4] = height;
+        size_hints[5] = width;
+        size_hints[6] = height;
+        size_hints[7] = width;
+        size_hints[8] = height;
+        size_hints[17] = 10; // StaticGravity
+        let _ = conn.change_property32(
+            x11rb::protocol::xproto::PropMode::REPLACE,
+            win_id,
+            wm_normal_hints,
+            wm_size_hints,
+            &size_hints,
+        );
+    }
+
+    // 2. Configure window geometry on the unmapped window
+    let values = x11rb::protocol::xproto::ConfigureWindowAux::new()
+        .x(x)
+        .y(y)
+        .width(width)
+        .height(height);
+    let _ = conn.configure_window(win_id, &values);
+
+    // 3. Move window to current desktop if multiple workspaces exist
+    if net_current_desktop != 0 && net_wm_desktop != 0 {
+        if let Ok(reply) = conn.get_property(
+            false,
+            root,
+            net_current_desktop,
+            x11rb::protocol::xproto::AtomEnum::CARDINAL,
+            0,
+            1,
+        ) {
+            if let Ok(prop) = reply.reply() {
+                if let Some(mut current_desktop) = prop.value32() {
+                    if let Some(desktop) = current_desktop.next() {
+                        let data = [desktop, 2, 0, 0, 0];
+                        let msg = x11rb::protocol::xproto::ClientMessageEvent {
+                            response_type: x11rb::protocol::xproto::CLIENT_MESSAGE_EVENT,
+                            format: 32,
+                            sequence: 0,
+                            window: win_id,
+                            type_: net_wm_desktop,
+                            data: x11rb::protocol::xproto::ClientMessageData::from(data),
+                        };
+                        let _ = conn.send_event(
+                            false,
+                            root,
+                            x11rb::protocol::xproto::EventMask::SUBSTRUCTURE_REDIRECT
+                                | x11rb::protocol::xproto::EventMask::SUBSTRUCTURE_NOTIFY,
+                            msg,
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    // 4. Map the window
+    let _ = conn.map_window(win_id);
+
+    // 5. Send _NET_ACTIVE_WINDOW
+    if net_active_window != 0 {
+        let data = [2u32, 0, 0, 0, 0];
+        let msg = x11rb::protocol::xproto::ClientMessageEvent {
+            response_type: x11rb::protocol::xproto::CLIENT_MESSAGE_EVENT,
+            format: 32,
+            sequence: 0,
+            window: win_id,
+            type_: net_active_window,
+            data: x11rb::protocol::xproto::ClientMessageData::from(data),
+        };
+        let _ = conn.send_event(
+            false,
+            root,
+            x11rb::protocol::xproto::EventMask::SUBSTRUCTURE_REDIRECT
+                | x11rb::protocol::xproto::EventMask::SUBSTRUCTURE_NOTIFY,
+            msg,
+        );
+    }
+
+    // 6. Send EWMH _NET_MOVERESIZE_WINDOW for window managers managing decorations
+    if net_moveresize != 0 {
+        let flags: u32 = 10 | (1 << 8) | (1 << 9) | (1 << 10) | (1 << 11);
+        let data = [flags, x as u32, y as u32, width, height];
+        let msg = x11rb::protocol::xproto::ClientMessageEvent {
+            response_type: x11rb::protocol::xproto::CLIENT_MESSAGE_EVENT,
+            format: 32,
+            sequence: 0,
+            window: win_id,
+            type_: net_moveresize,
+            data: x11rb::protocol::xproto::ClientMessageData::from(data),
+        };
+        let _ = conn.send_event(
+            false,
+            root,
+            x11rb::protocol::xproto::EventMask::SUBSTRUCTURE_REDIRECT
+                | x11rb::protocol::xproto::EventMask::SUBSTRUCTURE_NOTIFY,
+            msg,
+        );
+    }
+
+    let _ = conn.flush();
+    true
 }
 
 /// Maps and activates the window purely using native Rust X11 protocol without external CLI dependencies.
@@ -309,7 +455,7 @@ pub fn native_x11_moveresize(win_id: u32, x: i32, y: i32, width: u32, height: u3
         .unwrap_or(0);
 
     if net_moveresize != 0 {
-        let flags: u32 = 1 | (1 << 8) | (1 << 9) | (1 << 10) | (1 << 11);
+        let flags: u32 = 10 | (1 << 8) | (1 << 9) | (1 << 10) | (1 << 11);
         let data = [flags, x as u32, y as u32, width, height];
         let msg = x11rb::protocol::xproto::ClientMessageEvent {
             response_type: x11rb::protocol::xproto::CLIENT_MESSAGE_EVENT,

@@ -1,4 +1,4 @@
-use super::x11::{native_x11_activate, native_x11_moveresize};
+use super::x11::{native_x11_activate, native_x11_moveresize, native_x11_show};
 use std::process::Command;
 
 /// Trait defining a strategy for controlling, positioning, and focusing the Ditto window on Linux.
@@ -7,6 +7,10 @@ pub trait WindowController: Send + Sync {
     fn is_available(&self) -> bool;
     fn activate(&self, window_id: u32) -> bool;
     fn move_resize(&self, window_id: u32, x: i32, y: i32, width: u32, height: u32) -> bool;
+    fn show(&self, window_id: u32, x: i32, y: i32, width: u32, height: u32) -> bool {
+        self.move_resize(window_id, x, y, width, height);
+        self.activate(window_id)
+    }
 }
 
 /// Strategy for Hyprland Wayland compositor using `hyprctl`.
@@ -152,6 +156,10 @@ impl WindowController for NativeX11Controller {
     fn move_resize(&self, window_id: u32, x: i32, y: i32, width: u32, height: u32) -> bool {
         native_x11_moveresize(window_id, x, y, width, height)
     }
+
+    fn show(&self, window_id: u32, x: i32, y: i32, width: u32, height: u32) -> bool {
+        native_x11_show(window_id, x, y, width, height)
+    }
 }
 
 /// Composite controller providing prioritized fallback across window control strategies.
@@ -165,8 +173,8 @@ impl Default for CompositeWindowController {
             controllers: vec![
                 Box::new(HyprlandController),
                 Box::new(SwayController),
-                Box::new(WmctrlController),
                 Box::new(NativeX11Controller),
+                Box::new(WmctrlController),
             ],
         }
     }
@@ -197,6 +205,25 @@ impl CompositeWindowController {
         for controller in &self.controllers {
             if controller.is_available() {
                 if controller.move_resize(window_id, x, y, width, height) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// Atomically positions, maps, and activates the window using the first available strategy.
+    pub fn show_window(
+        &self,
+        window_id: u32,
+        x: i32,
+        y: i32,
+        width: u32,
+        height: u32,
+    ) -> bool {
+        for controller in &self.controllers {
+            if controller.is_available() {
+                if controller.show(window_id, x, y, width, height) {
                     return true;
                 }
             }

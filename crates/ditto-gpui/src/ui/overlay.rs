@@ -9,27 +9,59 @@ use std::time::{Duration, Instant};
 
 use super::icons::{ICON_CLOSE, ICON_IMAGE, ICON_SEARCH, ICON_SETTINGS, LOGO_PNG};
 use super::theme::ThemeColors;
+use crate::fonts::{MONO_FONT, UI_FONT};
 use crate::search::{format_size, get_relative_time_at, get_simple_hash};
 use crate::state::AppState;
 #[derive(Clone)]
 pub struct CardItemView {
     pub id: i64,
     pub is_image: bool,
-    pub preview_text: String,
-    pub relative_time: String,
+    pub preview_text: SharedString,
+    pub relative_time: SharedString,
+}
+
+struct PreviewItemView {
+    id: i64,
+    copied_at: String,
+    text: SharedString,
+    size: String,
+    checksum: String,
+}
+
+impl PreviewItemView {
+    fn new(item: &ClipboardItem) -> Self {
+        let mut chars = item.content.chars();
+        let mut text = if item.content.starts_with("data:image/png;base64,") {
+            String::new()
+        } else {
+            chars.by_ref().take(10_000).collect::<String>()
+        };
+        if !text.is_empty() && chars.next().is_some() {
+            text.push_str(
+                "\n\n… Preview limited to 10,000 characters. Copy includes the full entry.",
+            );
+        }
+        Self {
+            id: item.id,
+            copied_at: item.created_at.clone(),
+            text: text.into(),
+            size: format_size(item.content.len()),
+            checksum: get_simple_hash(&item.content),
+        }
+    }
 }
 
 pub struct DittoOverlayView {
     pub state: AppState,
     pub query: String,
     pub selected_index: usize,
-    pub filtered_items: Vec<ClipboardItem>,
+    pub filtered_items: Vec<Arc<ClipboardItem>>,
     pub card_views: Vec<CardItemView>,
     pub search_input: Entity<InputState>,
     pub opacity_slider: Entity<SliderState>,
     pub history_limit_input: Entity<InputState>,
     pub focus_handle: FocusHandle,
-    pub list_scroll_handle: ScrollHandle,
+    pub list_scroll_handle: UniformListScrollHandle,
     pub settings_scroll_handle: ScrollHandle,
     pub in_settings: bool,
     pub theme_colors: ThemeColors,
@@ -37,10 +69,12 @@ pub struct DittoOverlayView {
     pub snapshot_time: chrono::DateTime<chrono::Utc>,
     pub cached_images: Vec<(i64, Arc<Image>)>,
     pub last_nav_time: Instant,
+    preview: Option<PreviewItemView>,
+    copy_error: Option<String>,
     _subscriptions: Vec<Subscription>,
 }
 fn build_card_views(
-    items: &[ClipboardItem],
+    items: &[Arc<ClipboardItem>],
     snapshot_time: chrono::DateTime<chrono::Utc>,
 ) -> Vec<CardItemView> {
     items
@@ -50,19 +84,22 @@ fn build_card_views(
             let preview_text = if is_img {
                 "Image Clip".to_string()
             } else {
-                let first_line = item.content.lines().next().unwrap_or(&item.content);
-                if first_line.chars().count() > 32 {
-                    format!("{}...", first_line.chars().take(32).collect::<String>())
-                } else {
-                    first_line.to_string()
+                let mut chars = item
+                    .content
+                    .chars()
+                    .take_while(|ch| *ch != '\n' && *ch != '\r');
+                let mut preview: String = chars.by_ref().take(36).collect();
+                if chars.next().is_some() {
+                    preview.push('…');
                 }
+                preview
             };
             let relative_time = get_relative_time_at(&item.created_at, snapshot_time);
             CardItemView {
                 id: item.id,
                 is_image: is_img,
-                preview_text,
-                relative_time,
+                preview_text: preview_text.into(),
+                relative_time: relative_time.into(),
             }
         })
         .collect()
@@ -73,7 +110,7 @@ impl DittoOverlayView {
         let config = state.config.read().clone();
         let theme_colors = ThemeColors::from_config(&config);
         let focus_handle = cx.focus_handle();
-        let list_scroll_handle = ScrollHandle::new();
+        let list_scroll_handle = UniformListScrollHandle::new();
         let settings_scroll_handle = ScrollHandle::new();
         let shown_at = Instant::now();
 
@@ -85,15 +122,19 @@ impl DittoOverlayView {
         let sub_input = cx.subscribe_in(
             &search_input,
             window,
-            |this, state, event: &InputEvent, _, cx| {
-                if matches!(event, InputEvent::Change) {
-                    let val = state.read(cx).value();
-                    this.query = val.to_string();
+            |this, state, event: &InputEvent, window, cx| match event {
+                InputEvent::Change => {
+                    this.query = state.read(cx).value().to_string();
                     this.update_filter();
                     this.selected_index = 0;
-                    this.list_scroll_handle.scroll_to_item(0);
+                    this.list_scroll_handle
+                        .scroll_to_item(0, ScrollStrategy::Top);
                     cx.notify();
                 }
+                InputEvent::PressEnter { .. } if !this.in_settings => {
+                    this.copy_selected(window, cx);
+                }
+                _ => {}
             },
         );
 
@@ -179,6 +220,8 @@ impl DittoOverlayView {
             snapshot_time,
             cached_images: Vec::with_capacity(16),
             last_nav_time: Instant::now(),
+            preview: None,
+            copy_error: None,
             _subscriptions: vec![sub_input, sub_activation, sub_opacity, sub_limit],
         }
     }
@@ -196,7 +239,8 @@ impl DittoOverlayView {
     pub fn select_next(&mut self, cx: &mut Context<Self>) {
         if !self.filtered_items.is_empty() && self.selected_index + 1 < self.filtered_items.len() {
             self.selected_index += 1;
-            self.list_scroll_handle.scroll_to_item(self.selected_index);
+            self.list_scroll_handle
+                .scroll_to_item(self.selected_index, ScrollStrategy::Nearest);
             cx.notify();
         }
     }
@@ -204,7 +248,8 @@ impl DittoOverlayView {
     pub fn select_prev(&mut self, cx: &mut Context<Self>) {
         if self.selected_index > 0 {
             self.selected_index -= 1;
-            self.list_scroll_handle.scroll_to_item(self.selected_index);
+            self.list_scroll_handle
+                .scroll_to_item(self.selected_index, ScrollStrategy::Nearest);
             cx.notify();
         }
     }
@@ -216,10 +261,16 @@ impl DittoOverlayView {
     pub fn copy_index(&mut self, idx: usize, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(item) = self.filtered_items.get(idx) {
             let content = item.content.clone();
-            let _ = ditto_core::clipboard::set_text(&content);
-            let _ = self.state.insert_clip(&content);
+            if let Err(error) = ditto_core::clipboard::set_text(&content) {
+                self.copy_error = Some(format!("Could not copy entry: {error}"));
+                cx.notify();
+                return;
+            }
+            self.copy_error = None;
+            if let Err(error) = self.state.insert_clip(&content) {
+                eprintln!("ditto: could not update copied entry in history: {error}");
+            }
             self.selected_index = 0;
-            self.update_filter();
             self.hide_overlay(window, cx);
         }
     }
@@ -232,23 +283,14 @@ impl DittoOverlayView {
             if self.selected_index >= self.filtered_items.len() {
                 self.selected_index = self.filtered_items.len().saturating_sub(1);
             }
-            self.list_scroll_handle.scroll_to_item(self.selected_index);
+            self.list_scroll_handle
+                .scroll_to_item(self.selected_index, ScrollStrategy::Nearest);
             cx.notify();
         }
     }
 
     pub fn hide_overlay(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let clear = self.state.config.read().escape_clears_search;
-        if clear {
-            self.query.clear();
-            self.search_input.update(cx, |input, cx| {
-                input.clean(window, cx);
-            });
-            self.selected_index = 0;
-            self.update_filter();
-        }
-
-        // Save window position and hide via X11 UnmapWindow (keeps WGPU surface alive)
+        // Save window position and hide via X11 UnmapWindow immediately
         #[cfg(target_os = "linux")]
         if let Some((x, y)) = crate::platform::hide_window() {
             if x > 10 && y > 10 {
@@ -261,6 +303,16 @@ impl DittoOverlayView {
 
         #[cfg(not(target_os = "linux"))]
         window.remove_window();
+
+        let clear = self.state.config.read().escape_clears_search;
+        if clear {
+            self.query.clear();
+            self.search_input.update(cx, |input, cx| {
+                input.clean(window, cx);
+            });
+            self.selected_index = 0;
+            self.update_filter();
+        }
     }
 
     pub fn on_show(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -273,8 +325,14 @@ impl DittoOverlayView {
         cx.notify();
     }
 
-    pub fn toggle_settings(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+    pub fn toggle_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.in_settings = !self.in_settings;
+        if self.in_settings {
+            self.focus_handle.focus(window, cx);
+        } else {
+            self.search_input
+                .update(cx, |input, cx| input.focus(window, cx));
+        }
         cx.notify();
     }
 
@@ -289,9 +347,11 @@ impl DittoOverlayView {
 
         if modifiers.control || modifiers.platform {
             if key == "," {
+                cx.stop_propagation();
                 self.toggle_settings(window, cx);
                 return;
             } else if key == "l" {
+                cx.stop_propagation();
                 let _ = self.state.clear_history();
                 self.update_filter();
                 cx.notify();
@@ -299,9 +359,10 @@ impl DittoOverlayView {
             }
         }
 
-        if modifiers.alt {
+        if modifiers.alt && !self.in_settings {
             if let Ok(num) = key.parse::<usize>() {
                 if num >= 1 && num <= 9 {
+                    cx.stop_propagation();
                     self.copy_index(num - 1, window, cx);
                     return;
                 }
@@ -310,17 +371,20 @@ impl DittoOverlayView {
 
         match key {
             "escape" => {
+                cx.stop_propagation();
                 if self.in_settings {
-                    self.in_settings = false;
-                    cx.notify();
+                    self.toggle_settings(window, cx);
                 } else {
                     self.hide_overlay(window, cx);
                 }
             }
             "down" | "arrowdown" => {
                 if !self.in_settings {
+                    cx.stop_propagation();
                     let now = Instant::now();
-                    if now.duration_since(self.last_nav_time) >= Duration::from_millis(50) {
+                    if !event.is_held
+                        || now.duration_since(self.last_nav_time) >= Duration::from_millis(50)
+                    {
                         self.last_nav_time = now;
                         self.select_next(cx);
                     }
@@ -328,20 +392,32 @@ impl DittoOverlayView {
             }
             "up" | "arrowup" => {
                 if !self.in_settings {
+                    cx.stop_propagation();
                     let now = Instant::now();
-                    if now.duration_since(self.last_nav_time) >= Duration::from_millis(50) {
+                    if !event.is_held
+                        || now.duration_since(self.last_nav_time) >= Duration::from_millis(50)
+                    {
                         self.last_nav_time = now;
                         self.select_prev(cx);
                     }
                 }
             }
+            // Inputs emit PressEnter; raw Enter is only a fallback outside search.
             "enter" => {
-                if !self.in_settings {
+                if !self.in_settings
+                    && !self
+                        .search_input
+                        .read(cx)
+                        .focus_handle(cx)
+                        .is_focused(window)
+                {
+                    cx.stop_propagation();
                     self.copy_selected(window, cx);
                 }
             }
             "delete" => {
                 if !self.in_settings {
+                    cx.stop_propagation();
                     self.delete_selected(cx);
                 }
             }
@@ -359,18 +435,10 @@ impl Render for DittoOverlayView {
         let mut outer = div()
             .id("ditto-overlay-root")
             .track_focus(&self.focus_handle)
-            // Intercept Escape action regardless of input focus!
-            .on_action(
-                cx.listener(|this, _: &gpui_kit::component::input::Escape, window, cx| {
-                    if this.in_settings {
-                        this.in_settings = false;
-                        cx.notify();
-                    } else {
-                        this.hide_overlay(window, cx);
-                    }
-                }),
-            )
-            .on_key_down(cx.listener(Self::handle_key_down))
+            // Handle overlay shortcuts once, before focused widgets dispatch actions.
+            // Search Enter still goes through the input's submit event (including IME).
+            .capture_key_down(cx.listener(Self::handle_key_down))
+            .font_family(UI_FONT)
             .size_full()
             .flex()
             .flex_col()
@@ -397,7 +465,7 @@ impl Render for DittoOverlayView {
                     .px(px(16.0))
                     .justify_between()
                     .items_center()
-                    .bg(rgba(0x0a0a0cd9)) // rgba(10, 10, 12, 0.85)
+                    .bg(theme.tint(0.025))
                     .border_b_1()
                     .border_color(theme.border_card)
                     .child(
@@ -434,7 +502,7 @@ impl Render for DittoOverlayView {
                             .items_center()
                             .justify_center()
                             .rounded(px(6.0))
-                            .hover(|s| s.bg(rgba(0xffffff0d)))
+                            .hover(|s| s.bg(theme.tint(0.06)))
                             .cursor_pointer()
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.hide_overlay(window, cx);
@@ -454,9 +522,8 @@ impl Render for DittoOverlayView {
             let settings_view = self.render_settings_screen(window, cx);
             outer.child(settings_view)
         } else {
-            let active_item = self.filtered_items.get(self.selected_index).cloned();
             let left_col = self.render_left_column(&theme, is_paused, window, cx);
-            let right_col = self.render_right_column(&theme, active_item, window, cx);
+            let right_col = self.render_right_column(&theme, window, cx);
 
             outer.child(
                 h_flex()
@@ -480,7 +547,6 @@ impl DittoOverlayView {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let history_len = self.filtered_items.len();
-        let selected_idx = self.selected_index;
 
         // Search Header Container (NO start_window_move so clicking doesn't close window!)
         let search_header = h_flex()
@@ -497,9 +563,9 @@ impl DittoOverlayView {
                     .gap(px(8.0))
                     .items_center()
                     .rounded(px(8.0))
-                    .bg(rgba(0xffffff08))
+                    .bg(theme.tint(0.035))
                     .border_1()
-                    .border_color(theme.border_card)
+                    .border_color(theme.accent_primary)
                     .child(
                         svg()
                             .data(ICON_SEARCH.as_bytes())
@@ -538,7 +604,7 @@ impl DittoOverlayView {
                             .px(px(6.0))
                             .py(px(2.0))
                             .rounded(px(4.0))
-                            .hover(|s| s.bg(rgba(0xffffff14)))
+                            .hover(|s| s.bg(theme.tint(0.08)))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 let next = !this.state.is_paused();
                                 this.state.set_paused(next);
@@ -560,7 +626,7 @@ impl DittoOverlayView {
                                             .text_color(if is_paused {
                                                 rgb(0xf59e0b)
                                             } else {
-                                                rgb(0xffffff)
+                                                theme.text_primary
                                             })
                                             .child(if is_paused { "Paused" } else { "Live" }),
                                     ),
@@ -572,7 +638,7 @@ impl DittoOverlayView {
                             .cursor_pointer()
                             .p(px(2.0))
                             .rounded(px(4.0))
-                            .hover(|s| s.bg(rgba(0xffffff14)))
+                            .hover(|s| s.bg(theme.tint(0.08)))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.toggle_settings(window, cx);
                             }))
@@ -585,126 +651,22 @@ impl DittoOverlayView {
                     ),
             );
 
-        // Scrollable History Cards List with proper padding to avoid right gap
-        let mut list_cards = v_flex()
-            .id("history-list-cards")
-            .size_full()
-            .overflow_y_scroll()
-            .track_scroll(&self.list_scroll_handle)
-            .pl(px(12.0))
-            .pr(px(16.0))
-            .py(px(12.0))
-            .gap(px(8.0));
-
-        for (idx, item) in self.card_views.iter().enumerate() {
-            let is_selected = idx == selected_idx;
-            let is_img = item.is_image;
-            let relative_time = item.relative_time.clone();
-            let preview_text = item.preview_text.clone();
-
-            let card = h_flex()
-                .id(idx)
-                .p(px(10.0))
-                .rounded(px(8.0))
-                .justify_between()
-                .items_center()
-                .cursor_pointer()
-                .border_1()
-                .border_color(if is_selected {
-                    theme.accent_primary
-                } else {
-                    theme.border_card
-                })
-                .bg(if is_selected {
-                    rgba(0xffffff0d)
-                } else {
-                    rgba(0xffffff05)
-                })
-                .hover(|s| {
-                    if is_selected {
-                        s
-                    } else {
-                        s.bg(rgba(0xffffff0a))
-                    }
-                })
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    this.selected_index = idx;
-                    this.copy_index(idx, window, cx);
-                }))
-                .child(
-                    h_flex()
-                        .gap(px(10.0))
-                        .items_center()
-                        .flex_1()
-                        .min_w_0()
-                        .overflow_hidden()
-                        .child(if is_img {
-                            svg()
-                                .data(ICON_IMAGE.as_bytes())
-                                .size(px(14.0))
-                                .text_color(if is_selected {
-                                    theme.accent_primary
-                                } else {
-                                    theme.text_secondary
-                                })
-                                .into_any_element()
-                        } else {
-                            div()
-                                .font_family("monospace")
-                                .text_xs()
-                                .font_weight(FontWeight::BOLD)
-                                .text_color(if is_selected {
-                                    theme.accent_primary
-                                } else {
-                                    theme.text_secondary
-                                })
-                                .child("T")
-                                .into_any_element()
-                        })
-                        .child(
-                            v_flex()
-                                .gap(px(2.0))
-                                .flex_1()
-                                .min_w_0()
-                                .overflow_hidden()
-                                .child(
-                                    div()
-                                        .text_xs()
-                                        .font_weight(FontWeight::MEDIUM)
-                                        .text_color(theme.text_primary)
-                                        .truncate()
-                                        .child(preview_text),
-                                )
-                                .child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(theme.text_secondary)
-                                        .truncate()
-                                        .child(relative_time),
-                                ),
-                        ),
-                );
-
-            let card = if idx < 9 {
-                card.child(
-                    div()
-                        .px(px(6.0))
-                        .py(px(2.0))
-                        .rounded(px(4.0))
-                        .bg(rgba(0xffffff0d))
-                        .border_1()
-                        .border_color(theme.border_card)
-                        .text_xs()
-                        .font_family("monospace")
-                        .text_color(theme.text_secondary)
-                        .child(format!("⌥{}", idx + 1)),
-                )
-            } else {
-                card
-            };
-
-            list_cards = list_cards.child(card);
-        }
+        // Build and lay out only the visible rows, regardless of history size.
+        let list_cards = uniform_list(
+            "history-list-cards",
+            history_len,
+            cx.processor(|this, range: std::ops::Range<usize>, _, cx| {
+                let theme = this.theme_colors.clone();
+                range
+                    .map(|idx| this.render_history_card(idx, &theme, cx))
+                    .collect()
+            }),
+        )
+        .size_full()
+        .track_scroll(&self.list_scroll_handle)
+        .pl(px(12.0))
+        .pr(px(16.0))
+        .py(px(12.0));
 
         // Relative container with persistent overlay scrollbar (flush right)
         let list_container = div()
@@ -728,22 +690,169 @@ impl DittoOverlayView {
             .w(px(320.0))
             .flex_none()
             .h_full()
-            .bg(rgba(0x0a0a0c99)) // rgba(10, 10, 12, 0.60)
+            .bg(theme.tint(0.02))
             .border_r_1()
             .border_color(theme.border_card)
             .child(search_header)
             .child(subheader)
+            .children(self.copy_error.as_ref().map(|message| {
+                div()
+                    .px(px(16.0))
+                    .py(px(8.0))
+                    .text_xs()
+                    .text_color(theme.accent_primary)
+                    .child(message.clone())
+            }))
             .child(list_container)
+    }
+
+    fn render_history_card(
+        &self,
+        idx: usize,
+        theme: &ThemeColors,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let item = &self.card_views[idx];
+        let is_selected = idx == self.selected_index;
+        let is_img = item.is_image;
+        let relative_time = item.relative_time.clone();
+        let preview_text = item.preview_text.clone();
+        let card = h_flex()
+            .id(idx)
+            .p(px(10.0))
+            .rounded(px(8.0))
+            .justify_between()
+            .items_center()
+            .cursor_pointer()
+            .border_1()
+            .border_color(if is_selected {
+                theme.accent_primary
+            } else {
+                theme.border_card
+            })
+            .bg(if is_selected {
+                theme.selection()
+            } else {
+                theme.tint(0.018)
+            })
+            .hover(|s| {
+                if is_selected {
+                    s
+                } else {
+                    s.bg(theme.tint(0.06))
+                }
+            })
+            .on_click(cx.listener(move |this, _, window, cx| {
+                this.selected_index = idx;
+                this.copy_index(idx, window, cx);
+            }))
+            .child(
+                h_flex()
+                    .gap(px(10.0))
+                    .items_center()
+                    .flex_1()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .child(if is_img {
+                        svg()
+                            .data(ICON_IMAGE.as_bytes())
+                            .size(px(14.0))
+                            .text_color(if is_selected {
+                                theme.accent_primary
+                            } else {
+                                theme.text_secondary
+                            })
+                            .into_any_element()
+                    } else {
+                        div()
+                            .font_family(MONO_FONT)
+                            .text_xs()
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(if is_selected {
+                                theme.accent_primary
+                            } else {
+                                theme.text_secondary
+                            })
+                            .child("T")
+                            .into_any_element()
+                    })
+                    .child(
+                        v_flex()
+                            .gap(px(2.0))
+                            .flex_1()
+                            .min_w_0()
+                            .overflow_hidden()
+                            .child(
+                                div()
+                                    .text_size(px(13.0))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme.text_primary)
+                                    .truncate()
+                                    .child(preview_text),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(theme.text_secondary)
+                                    .truncate()
+                                    .child(relative_time),
+                            ),
+                    ),
+            );
+
+        let card = if idx < 9 {
+            card.child(
+                div()
+                    .px(px(6.0))
+                    .py(px(2.0))
+                    .rounded(px(4.0))
+                    .bg(theme.tint(0.05))
+                    .border_1()
+                    .border_color(theme.border_card)
+                    .text_xs()
+                    .font_family(MONO_FONT)
+                    .text_color(theme.text_secondary)
+                    .child(format!(
+                        "{}{}",
+                        if cfg!(target_os = "macos") {
+                            "⌥"
+                        } else {
+                            "Alt+"
+                        },
+                        idx + 1
+                    )),
+            )
+        } else {
+            card
+        };
+        // Fixed-height rows keep the list's virtualized geometry stable.
+        div()
+            .h(px(72.0))
+            .w_full()
+            .pb(px(8.0))
+            .child(card.h(px(64.0)).w_full())
     }
 
     /// Renders the flexible right column (preview, metadata, shortcuts footer)
     fn render_right_column(
         &mut self,
         theme: &ThemeColors,
-        active_item: Option<ClipboardItem>,
+        // The selected payload stays borrowed; only bounded preview text is retained.
         _: &mut Window,
         _: &mut Context<Self>,
     ) -> impl IntoElement {
+        let active_item = self.filtered_items.get(self.selected_index);
+        if let Some(item) = active_item {
+            if self
+                .preview
+                .as_ref()
+                .is_none_or(|preview| preview.id != item.id || preview.copied_at != item.created_at)
+            {
+                self.preview = Some(PreviewItemView::new(item));
+            }
+        } else {
+            self.preview = None;
+        }
         let content_view = if let Some(item) = &active_item {
             let is_image = item.content.starts_with("data:image/png;base64,");
             if is_image {
@@ -792,7 +901,7 @@ impl DittoOverlayView {
                                 .overflow_hidden()
                                 .border_1()
                                 .border_color(theme.border_card)
-                                .bg(rgba(0x00000033))
+                                .bg(theme.tint(0.04))
                                 .child(
                                     img(image_data)
                                         .max_w(px(400.0))
@@ -820,17 +929,10 @@ impl DittoOverlayView {
                     .p(px(20.0))
                     .child(
                         div()
-                            .font_family("monospace")
+                            .font_family(MONO_FONT)
                             .text_sm()
                             .text_color(theme.text_primary)
-                            .child(if item.content.len() > 10_000 {
-                                let mut truncated =
-                                    item.content.chars().take(10_000).collect::<String>();
-                                truncated.push_str("\n\n... [Content truncated for preview]");
-                                truncated
-                            } else {
-                                item.content.clone()
-                            }),
+                            .child(self.preview.as_ref().unwrap().text.clone()),
                     )
                     .into_any_element()
             }
@@ -842,7 +944,11 @@ impl DittoOverlayView {
                 .justify_center()
                 .text_sm()
                 .text_color(theme.text_secondary)
-                .child("No clipboard items found")
+                .child(if self.query.is_empty() {
+                    "Your clipboard history is empty.\nCopy text or an image to get started."
+                } else {
+                    "No matching entries.\nTry fewer words or clear your search."
+                })
                 .into_any_element()
         };
 
@@ -850,9 +956,7 @@ impl DittoOverlayView {
         let metadata_section = if let Some(item) = &active_item {
             let is_image = item.content.starts_with("data:image/png;base64,");
             let mime_str = if is_image { "image/png" } else { "text/plain" };
-            let size_str = format_size(item.content.len());
-            let copied_at = item.created_at.clone();
-            let checksum = get_simple_hash(&item.content);
+            let preview = self.preview.as_ref().unwrap();
 
             v_flex()
                 .h(px(154.0))
@@ -860,7 +964,7 @@ impl DittoOverlayView {
                 .pt(px(14.0))
                 .pb(px(14.0))
                 .gap(px(8.0))
-                .bg(rgb(0x0f0f12))
+                .bg(theme.tint(0.025))
                 .border_t_1()
                 .border_color(theme.border_card)
                 .child(
@@ -868,20 +972,20 @@ impl DittoOverlayView {
                         .gap(px(3.0))
                         .text_xs()
                         .child(self.meta_row("Mime", mime_str, theme))
-                        .child(self.meta_row("Size", &size_str, theme))
-                        .child(self.meta_row("Copied at", &copied_at, theme))
-                        .child(self.meta_row("Checksum", &checksum, theme)),
+                        .child(self.meta_row("Size", &preview.size, theme))
+                        .child(self.meta_row("Copied at", &preview.copied_at, theme))
+                        .child(self.meta_row("Checksum", &preview.checksum, theme)),
                 )
                 .child(
                     h_flex()
-                        .gap(px(16.0))
+                        .gap(px(10.0))
                         .pt(px(6.0))
                         .pb(px(4.0))
                         .border_t_1()
                         .border_color(theme.border_card)
                         .items_center()
                         .text_xs()
-                        .child(self.shortcut_hint("Enter", "Copy", theme))
+                        .child(self.shortcut_hint("Enter", "Copy & hide", theme))
                         .child(self.shortcut_hint("Esc", "Hide", theme))
                         .child(self.shortcut_hint("Ctrl+,", "Settings", theme)),
                 )
@@ -892,7 +996,7 @@ impl DittoOverlayView {
                 .pt(px(14.0))
                 .pb(px(14.0))
                 .justify_center()
-                .bg(rgb(0x0f0f12))
+                .bg(theme.tint(0.025))
                 .border_t_1()
                 .border_color(theme.border_card)
                 .child(
@@ -910,7 +1014,7 @@ impl DittoOverlayView {
             .min_w_0()
             .h_full()
             .overflow_hidden()
-            .bg(rgba(0x0c0c0e66)) // rgba(12, 12, 14, 0.40)
+            .bg(theme.tint(0.01))
             .child(content_view)
             .child(metadata_section)
     }
@@ -926,7 +1030,7 @@ impl DittoOverlayView {
             )
             .child(
                 div()
-                    .font_family("monospace")
+                    .font_family(MONO_FONT)
                     .text_color(theme.text_primary)
                     .child(val.to_string()),
             )
@@ -941,10 +1045,10 @@ impl DittoOverlayView {
                     .px(px(6.0))
                     .py(px(1.0))
                     .rounded(px(4.0))
-                    .bg(rgba(0xffffff0d))
+                    .bg(theme.tint(0.05))
                     .border_1()
                     .border_color(theme.border_card)
-                    .font_family("monospace")
+                    .font_family(MONO_FONT)
                     .text_xs()
                     .text_color(theme.text_secondary)
                     .child(key.to_string()),
@@ -966,13 +1070,16 @@ impl DittoOverlayView {
         h_flex()
             .justify_between()
             .items_center()
+            .gap(px(16.0))
             .p(px(12.0))
             .rounded(px(8.0))
-            .bg(rgba(0x00000033))
+            .bg(theme.tint(0.035))
             .border_1()
             .border_color(theme.border_card)
             .child(
                 v_flex()
+                    .flex_1()
+                    .min_w_0()
                     .gap(px(2.0))
                     .child(
                         div()
@@ -1047,7 +1154,7 @@ impl DittoOverlayView {
                     .p(px(12.0))
                     .gap(px(8.0))
                     .rounded(px(8.0))
-                    .bg(rgba(0x00000033))
+                    .bg(theme.tint(0.035))
                     .border_1()
                     .border_color(theme.border_card)
                     .child(
@@ -1064,7 +1171,7 @@ impl DittoOverlayView {
                             .child(
                                 div()
                                     .text_xs()
-                                    .font_family("monospace")
+                                    .font_family(MONO_FONT)
                                     .font_weight(FontWeight::BOLD)
                                     .text_color(theme.accent_primary)
                                     .child(format!("{} items", cur_max_items)),
@@ -1081,7 +1188,7 @@ impl DittoOverlayView {
                                     .px(px(8.0))
                                     .items_center()
                                     .rounded(px(6.0))
-                                    .bg(rgba(0xffffff08))
+                                    .bg(theme.tint(0.035))
                                     .border_1()
                                     .border_color(theme.border_card)
                                     .child(
@@ -1141,7 +1248,7 @@ impl DittoOverlayView {
                     .p(px(12.0))
                     .gap(px(10.0))
                     .rounded(px(8.0))
-                    .bg(rgba(0x00000033))
+                    .bg(theme.tint(0.035))
                     .border_1()
                     .border_color(theme.border_card)
                     .child(
@@ -1158,7 +1265,7 @@ impl DittoOverlayView {
                             .child(
                                 div()
                                     .text_xs()
-                                    .font_family("monospace")
+                                    .font_family(MONO_FONT)
                                     .font_weight(FontWeight::BOLD)
                                     .text_color(theme.accent_primary)
                                     .child(format!("{}%", cur_opacity)),
@@ -1219,7 +1326,7 @@ impl DittoOverlayView {
                     .p(px(12.0))
                     .gap(px(8.0))
                     .rounded(px(8.0))
-                    .bg(rgba(0x00000033))
+                    .bg(theme.tint(0.035))
                     .border_1()
                     .border_color(theme.border_card)
                     .child(
@@ -1236,7 +1343,7 @@ impl DittoOverlayView {
                             .child(
                                 div()
                                     .text_xs()
-                                    .font_family("monospace")
+                                    .font_family(MONO_FONT)
                                     .text_color(theme.accent_primary)
                                     .child(format!("Active: {}", cur_theme)),
                             ),
@@ -1262,7 +1369,7 @@ impl DittoOverlayView {
                         .gap(px(10.0))
                         .p(px(12.0))
                         .rounded(px(8.0))
-                        .bg(rgba(0x00000033))
+                        .bg(theme.tint(0.035))
                         .border_1()
                         .border_color(theme.border_card)
                         .child(self.color_preview_box("Accent", &cfg.custom_accent, &theme))
@@ -1279,7 +1386,7 @@ impl DittoOverlayView {
                     .p(px(12.0))
                     .gap(px(6.0))
                     .rounded(px(8.0))
-                    .bg(rgba(0x00000033))
+                    .bg(theme.tint(0.035))
                     .border_1()
                     .border_color(theme.border_card)
                     .child(
@@ -1302,11 +1409,11 @@ impl DittoOverlayView {
                             .children(ignored_apps.iter().map(|app| {
                                 div()
                                     .text_xs()
-                                    .font_family("monospace")
+                                    .font_family(MONO_FONT)
                                     .px(px(8.0))
                                     .py(px(3.0))
                                     .rounded(px(4.0))
-                                    .bg(rgba(0xffffff0d))
+                                    .bg(theme.tint(0.05))
                                     .border_1()
                                     .border_color(theme.border_card)
                                     .child(app.clone())
@@ -1357,14 +1464,13 @@ impl DittoOverlayView {
                             .rounded(px(6.0))
                             .border_1()
                             .border_color(theme.border_card)
-                            .bg(rgba(0xffffff0d))
-                            .hover(|s| s.bg(rgba(0xffffff1a)).text_color(theme.text_primary))
+                            .bg(theme.tint(0.05))
+                            .hover(|s| s.bg(theme.tint(0.1)).text_color(theme.text_primary))
                             .text_xs()
                             .font_weight(FontWeight::MEDIUM)
                             .text_color(theme.text_secondary)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.in_settings = false;
-                                cx.notify();
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.toggle_settings(window, cx);
                             }))
                             .child("← Back"),
                     )
@@ -1404,20 +1510,20 @@ impl DittoOverlayView {
                                     .text_xs()
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .text_color(theme.accent_primary)
-                                    .bg(rgba(0xffffff0a))
+                                    .bg(theme.tint(0.04))
                                     .px(px(6.0))
                                     .py(px(2.0))
                                     .rounded(px(4.0))
                                     .border_1()
                                     .border_color(theme.border_card)
-                                    .child("v1.0.0"),
+                                    .child(concat!("v", env!("CARGO_PKG_VERSION"))),
                             )
                             .child(
                                 div()
                                     .text_xs()
-                                    .font_family("monospace")
+                                    .font_family(MONO_FONT)
                                     .text_color(theme.text_secondary)
-                                    .bg(rgba(0xffffff0a))
+                                    .bg(theme.tint(0.04))
                                     .px(px(6.0))
                                     .py(px(2.0))
                                     .rounded(px(4.0))
@@ -1431,10 +1537,9 @@ impl DittoOverlayView {
                                     .cursor_pointer()
                                     .p(px(4.0))
                                     .rounded(px(6.0))
-                                    .hover(|s| s.bg(rgba(0xffffff14)))
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.in_settings = false;
-                                        cx.notify();
+                                    .hover(|s| s.bg(theme.tint(0.08)))
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.toggle_settings(window, cx);
                                     }))
                                     .child(
                                         svg()
@@ -1481,7 +1586,7 @@ impl DittoOverlayView {
                     )
                     .child(
                         div()
-                            .font_family("monospace")
+                            .font_family(MONO_FONT)
                             .text_xs()
                             .text_color(theme.text_primary)
                             .child(val.to_string()),
@@ -1502,12 +1607,12 @@ impl DittoOverlayView {
             .rounded(px(6.0))
             .cursor_pointer()
             .text_xs()
-            .font_family("monospace")
-            .bg(rgba(0xffffff0a))
+            .font_family(MONO_FONT)
+            .bg(theme.tint(0.04))
             .text_color(theme.text_secondary)
             .border_1()
             .border_color(theme.border_card)
-            .hover(|s| s.bg(rgba(0xffffff1a)).text_color(theme.text_primary))
+            .hover(|s| s.bg(theme.tint(0.1)).text_color(theme.text_primary))
             .on_click(on_click)
             .child(label)
     }
@@ -1523,6 +1628,7 @@ impl DittoOverlayView {
             .id(id)
             .w(px(36.0))
             .h(px(20.0))
+            .flex_none()
             .rounded_full()
             .cursor_pointer()
             .items_center()
@@ -1530,7 +1636,7 @@ impl DittoOverlayView {
             .bg(if enabled {
                 theme.accent_primary
             } else {
-                rgba(0xffffff26)
+                theme.tint(0.15)
             })
             .on_click(on_click)
             .child(
@@ -1579,7 +1685,7 @@ impl DittoOverlayView {
             } else {
                 theme.border_card
             })
-            .hover(|s| if is_active { s } else { s.bg(rgba(0xffffff1a)) })
+            .hover(|s| if is_active { s } else { s.bg(theme.tint(0.1)) })
             .on_click(cx.listener(move |this, _, _, cx| {
                 let mut cfg = this.state.config.read().clone();
                 cfg.theme = name.to_string();

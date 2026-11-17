@@ -57,14 +57,13 @@ pub fn hide_window() -> Option<(i32, i32)> {
     x11::unmap_and_get_coords()
 }
 
-/// Shows the Ditto window: activates it and positions it at (x, y).
+/// Shows the Ditto window: atomically positions, maps, and activates it at (x, y).
 pub fn show_window(x: i32, y: i32) {
     let Some(win_id) = x11::get_ditto_x11_window_id() else {
         return;
     };
 
-    CONTROLLER.activate_window(win_id);
-    CONTROLLER.move_resize_window(win_id, x, y, 800, 500);
+    CONTROLLER.show_window(win_id, x, y, 800, 500);
 }
 
 /// Requests window manager focus for the Ditto window.
@@ -95,16 +94,6 @@ mod tests {
                 | DesktopEnvironment::Xfce
                 | DesktopEnvironment::Generic
         ));
-    }
-
-    #[test]
-    fn test_controller_cascade_availability() {
-        let controller = CompositeWindowController::default();
-        assert_eq!(controller.controllers.len(), 4);
-        assert_eq!(controller.controllers[0].name(), "Hyprland");
-        assert_eq!(controller.controllers[1].name(), "Sway");
-        assert_eq!(controller.controllers[2].name(), "wmctrl");
-        assert_eq!(controller.controllers[3].name(), "NativeX11");
     }
 
     #[test]

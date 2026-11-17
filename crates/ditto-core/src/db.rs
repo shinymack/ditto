@@ -49,24 +49,35 @@ impl Db {
         })
     }
 
-    pub fn insert_or_update(&self, content: &str, max_items: usize) -> Result<()> {
-        let conn = self.conn.lock();
-        conn.execute(
+    /// Returns the persisted identity and timestamp for either a new or existing clip.
+    pub fn insert_or_update(&self, content: &str, max_items: usize) -> Result<ClipboardItem> {
+        let mut conn = self.conn.lock();
+        let transaction = conn.transaction()?;
+        let item = transaction.query_row(
             "INSERT INTO history (content, created_at)
              VALUES (?1, strftime('%Y-%m-%d %H:%M:%f', 'now'))
-             ON CONFLICT(content) DO UPDATE SET created_at = strftime('%Y-%m-%d %H:%M:%f', 'now')",
+             ON CONFLICT(content) DO UPDATE SET created_at = strftime('%Y-%m-%d %H:%M:%f', 'now')
+             RETURNING id, content, created_at",
             params![content],
+            |row| {
+                Ok(ClipboardItem {
+                    id: row.get(0)?,
+                    content: row.get(1)?,
+                    created_at: row.get(2)?,
+                })
+            },
         )?;
 
         // Enforce max_items limit by deleting older entries
-        conn.execute(
+        transaction.execute(
             "DELETE FROM history WHERE id NOT IN (
                 SELECT id FROM history ORDER BY created_at DESC LIMIT ?1
             )",
             params![max_items as i64],
         )?;
 
-        Ok(())
+        transaction.commit()?;
+        Ok(item)
     }
 
     pub fn get_history(&self, limit: usize, query: Option<&str>) -> Result<Vec<ClipboardItem>> {
@@ -129,6 +140,32 @@ impl Db {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_insert_returns_persisted_identity_after_duplicate() {
+        let db = Db::init(":memory:").unwrap();
+        let first = db.insert_or_update("first", 10).unwrap();
+        let second = db.insert_or_update("second", 10).unwrap();
+        let duplicate = db.insert_or_update("first", 10).unwrap();
+        let fresh = db.insert_or_update("fresh", 10).unwrap();
+
+        assert_eq!(duplicate.id, first.id);
+        assert!(fresh.id > second.id);
+        assert_ne!(fresh.id, duplicate.id);
+        let history = db.get_history(10, None).unwrap();
+        for returned in [&duplicate, &second, &fresh] {
+            let persisted = history.iter().find(|item| item.id == returned.id).unwrap();
+            assert_eq!(persisted.content, returned.content);
+            assert_eq!(persisted.created_at, returned.created_at);
+        }
+
+        db.delete_item(fresh.id).unwrap();
+        let remaining = db.get_history(10, None).unwrap();
+        assert_eq!(remaining.len(), 2);
+        assert!(remaining.iter().any(|item| item.id == first.id));
+        assert!(remaining.iter().any(|item| item.id == second.id));
+        assert!(!remaining.iter().any(|item| item.id == fresh.id));
+    }
 
     #[test]
     fn test_db_operations() {
